@@ -169,6 +169,7 @@ def run(
         writer.delete_by_file_path(fp)
 
     files_to_index = sorted(state.to_add | state.to_update)
+    total = len(files_to_index)
     indexed_at = datetime.now(UTC).isoformat()
 
     point_buffer: list[PointStruct] = []
@@ -188,7 +189,7 @@ def run(
         point_buffer = []
         files_done_in_buffer = 0
 
-    for fp in files_to_index:
+    for i, fp in enumerate(files_to_index, start=1):
         file_abs = repo_root / fp
         try:
             chunks = _load_chunks(file_abs)
@@ -200,6 +201,7 @@ def run(
         if not chunks:
             report.files_indexed += 1
             files_done_in_buffer += 1
+            logger.info("[%d/%d] %s (no chunks)", i, total, fp)
             continue
 
         texts = [c.text for c in chunks]
@@ -219,6 +221,7 @@ def run(
             )
         report.files_indexed += 1
         files_done_in_buffer += 1
+        logger.info("[%d/%d] %s (%d chunks)", i, total, fp, len(chunks))
 
         if (
             len(point_buffer) >= settings.qdrant_flush_chunks
