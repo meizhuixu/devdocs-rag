@@ -1,0 +1,19 @@
+name: Eval
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/devdocs_rag/retrieval/**"
+      - "src/devdocs_rag/generation/**"
+      - "eval/datasets/**"
+
+jobs:
+  ragas-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: TODO
+        run: |
+          echo "TODO(Phase 5): run eval/ragas_runner.py against eval/datasets/golden_qa.jsonl"
+          echo "Gate the PR on context_recall/faithfulness regression vs main."
