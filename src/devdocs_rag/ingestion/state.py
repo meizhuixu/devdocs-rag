@@ -125,4 +125,4 @@ class IngestionState:
         return IngestionState(current=current, existing=existing)
 
 
-__all__ = ["IngestionState", "_DOC_SUFFIXES", "_CODE_SUFFIXES"]
+__all__ = ["_CODE_SUFFIXES", "_DOC_SUFFIXES", "IngestionState"]

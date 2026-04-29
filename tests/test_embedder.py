@@ -163,7 +163,7 @@ def test_no_cache_always_encodes(embedder_factory: Any) -> None:
 
 def test_cache_preserves_order(embedder_factory: Any) -> None:
     cache = FakeRedis()
-    emb, model = embedder_factory(cache=cache)
+    emb, _model = embedder_factory(cache=cache)
 
     # warm "b" only
     out_b = emb.embed(["b"])

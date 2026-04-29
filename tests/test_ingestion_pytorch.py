@@ -40,9 +40,9 @@ def test_smoke_extending_rst_writes_to_qdrant() -> None:
     source_path = repo_root / "docs" / "source"
     smoke_file = "docs/source/notes/extending.rst"
 
-    assert (
-        repo_root / smoke_file
-    ).exists(), f"missing {smoke_file} — run scripts/fetch_pytorch_docs.sh first"
+    assert (repo_root / smoke_file).exists(), (
+        f"missing {smoke_file} — run scripts/fetch_pytorch_docs.sh first"
+    )
 
     namespace = "pytorch_docs_smoke_test"
     report = run(
@@ -55,9 +55,9 @@ def test_smoke_extending_rst_writes_to_qdrant() -> None:
 
     assert report.errors == []
     assert report.files_indexed == 1
-    assert (
-        report.chunks_written >= 5
-    ), f"expected ≥5 chunks for extending.rst, got {report.chunks_written}"
+    assert report.chunks_written >= 5, (
+        f"expected ≥5 chunks for extending.rst, got {report.chunks_written}"
+    )
 
     settings = get_settings()
     writer = QdrantWriter(
