@@ -8,15 +8,46 @@ sweep.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 _DOC_SUFFIXES = {".rst", ".md", ".txt"}
 _CODE_SUFFIXES = {".py"}
+
+
+def _match_glob_segments(path_parts: Sequence[str], pat_parts: Sequence[str]) -> bool:
+    """Recursive matcher: `**` consumes zero or more path segments.
+
+    Other segments are matched with `fnmatch.fnmatchcase` so `*`, `?`, `[seq]`
+    work within a single segment.
+    """
+    if not pat_parts:
+        return not path_parts
+    head, rest = pat_parts[0], pat_parts[1:]
+    if head == "**":
+        if not rest:
+            return True
+        return any(_match_glob_segments(path_parts[i:], rest) for i in range(len(path_parts) + 1))
+    if not path_parts:
+        return False
+    if fnmatch.fnmatchcase(path_parts[0], head):
+        return _match_glob_segments(path_parts[1:], rest)
+    return False
+
+
+def matches_any_glob(rel_path: str, patterns: Iterable[str]) -> bool:
+    """Return True if `rel_path` (POSIX-style, repo-root-relative) matches any pattern.
+
+    Supports `**` for "zero or more path segments" (gitignore-style). Patterns
+    use `/` as separator; `rel_path` must too.
+    """
+    path_parts = rel_path.split("/")
+    return any(_match_glob_segments(path_parts, p.split("/")) for p in patterns)
 
 
 def _git_commit_sha(repo_root: Path, rel_path: str) -> str | None:
@@ -40,14 +71,19 @@ def _scan_source(
     source_path: Path,
     repo_root: Path,
     suffixes: Iterable[str],
+    ignore_globs: Iterable[str] = (),
 ) -> dict[str, str]:
     """Walk `source_path` for files with the given suffixes, return {rel_path: commit_sha}.
 
     `rel_path` is relative to `repo_root` so it's stable across machines.
-    Files without git history are skipped with a warning.
+    Files without git history are skipped with a warning. Files matching any
+    `ignore_globs` pattern (gitignore-style, `**` supported) are skipped
+    silently.
     """
     result: dict[str, str] = {}
     suffix_set = set(suffixes)
+    ignore_list = list(ignore_globs)
+    n_ignored = 0
     for p in source_path.rglob("*"):
         if not p.is_file() or p.suffix not in suffix_set:
             continue
@@ -56,12 +92,17 @@ def _scan_source(
         except ValueError:
             logger.warning("file %s not under repo_root %s — skipping", p, repo_root)
             continue
-        rel_str = str(rel)
+        rel_str = rel.as_posix()
+        if ignore_list and matches_any_glob(rel_str, ignore_list):
+            n_ignored += 1
+            continue
         sha = _git_commit_sha(repo_root, rel_str)
         if sha is None:
             logger.warning("no git history for %s — skipping", rel_str)
             continue
         result[rel_str] = sha
+    if ignore_list:
+        logger.info("ignore-globs filtered %d files (patterns=%s)", n_ignored, ignore_list)
     return result
 
 
@@ -83,8 +124,9 @@ class IngestionState:
         repo_root: Path,
         existing: dict[str, str],
         suffixes: Iterable[str] = _DOC_SUFFIXES,
+        ignore_globs: Iterable[str] = (),
     ) -> IngestionState:
-        current = _scan_source(source_path, repo_root, suffixes)
+        current = _scan_source(source_path, repo_root, suffixes, ignore_globs=ignore_globs)
         return cls(current=current, existing=existing)
 
     @property
@@ -125,4 +167,4 @@ class IngestionState:
         return IngestionState(current=current, existing=existing)
 
 
-__all__ = ["_CODE_SUFFIXES", "_DOC_SUFFIXES", "IngestionState"]
+__all__ = ["_CODE_SUFFIXES", "_DOC_SUFFIXES", "IngestionState", "matches_any_glob"]

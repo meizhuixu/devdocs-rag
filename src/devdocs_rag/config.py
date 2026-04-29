@@ -59,6 +59,19 @@ class Settings(BaseSettings):
     qdrant_flush_chunks: int = Field(default=256)
     qdrant_flush_files: int = Field(default=32)
 
+    # Per-namespace gitignore-style globs applied during the source walk.
+    # Patterns are repo-root-relative; `**` matches zero or more path segments.
+    # Per-namespace (not global) because user-repo namespaces will need
+    # different patterns than docs namespaces (e.g. node_modules, __pycache__).
+    namespace_ignore_globs: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "pytorch_docs": [
+                "docs/source/scripts/**",
+                "docs/source/_static/**",
+            ],
+        }
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

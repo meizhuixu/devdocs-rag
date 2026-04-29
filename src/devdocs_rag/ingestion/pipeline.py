@@ -144,11 +144,13 @@ def run(
     writer.ensure_collection()
 
     existing = writer.scroll_file_shas()
+    ignore_globs = settings.namespace_ignore_globs.get(namespace, [])
     state = IngestionState.from_dirs(
         source_path=source_path,
         repo_root=repo_root,
         existing=existing,
         suffixes=suffixes,
+        ignore_globs=ignore_globs,
     )
 
     if smoke_file is not None:

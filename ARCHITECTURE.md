@@ -278,6 +278,43 @@ Every entry: **decision · alternatives considered · why this · when revisit**
 - **Outcome**: Phase 2 turned out to be a pure swap of two `get_*()`
   factories. No callsite changed. The Protocol design paid off.
 
+### D14 — Qdrant server pinned to v1.13.6
+
+- **Alternatives**: stay on v1.12.4 (Phase 1 default), bump to v1.16+ to fully
+  match the locally-installed `qdrant-client` 1.17.x.
+- **Why v1.13.x**: closes the v1.12.4 ↔ client v1.17.1 (5 minor) gap one
+  step at a time. Conservative bump — no storage-format risk on existing
+  data, and `docker compose pull && up -d` preserved all 2143 indexed
+  points without re-ingestion.
+- **Known residual**: client v1.17.1 still emits a warning against server
+  v1.13.6 (4 minors apart, policy is ≤1). To fully clear the warning we'd
+  need server v1.16.x or v1.17.x. Acceptable for now — functional behavior
+  is unaffected.
+- **Revisit**: when client crosses a major (v2.x) or when a future bump
+  lands a feature we want (e.g. native sparse vectors for hybrid search,
+  expected ~v1.15+).
+
+### D15 — Per-namespace ignore-globs (gitignore-style)
+
+- **Alternatives**: hard-coded skip-paths in the loader, a global ignore list
+  shared across namespaces, full `.gitignore` parsing via `pathspec`.
+- **Why per-namespace dict**: PyTorch docs need to skip Sphinx build
+  scripts (`docs/source/scripts/**`); user-repo namespaces will need
+  different patterns (`node_modules/**`, `__pycache__/**`, `dist/**`,
+  `*.lock`). A `dict[namespace, list[glob]]` in `Settings` keeps that
+  per-namespace tailoring without code changes.
+- **Why our own glob matcher** (not `pathspec`): minimal surface area —
+  `**` for recursive segments + `fnmatch` for single-segment wildcards
+  covers our needs in ~25 lines and one stdlib import. Adding `pathspec`
+  would buy full gitignore semantics (negation, `!`, anchored slashes)
+  we don't have a use case for. Tested in `tests/test_state.py` against
+  11 representative cases.
+- **Outcome**: 10 Sphinx-helper-script chunks removed from
+  `pytorch_docs` (2143 → 2133). The matcher is the same one user-repo
+  namespaces will use in Phase 4.
+- **Revisit**: if we hit a pattern we can't express (e.g. `!keep.py`
+  inside an ignored dir), swap to `pathspec` then.
+
 ---
 
 ## 7. Open questions

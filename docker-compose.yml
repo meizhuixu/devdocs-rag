@@ -1,6 +1,6 @@
 services:
   qdrant:
-    image: qdrant/qdrant:v1.12.4
+    image: qdrant/qdrant:v1.13.6
     container_name: devdocs-rag-qdrant
     ports:
       - "6333:6333"
