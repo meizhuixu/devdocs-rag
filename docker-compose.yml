@@ -9,6 +9,9 @@ services:
       - ./qdrant_storage:/qdrant/storage
     environment:
       QDRANT__LOG_LEVEL: INFO
+    # M3 Air, 16GB total. Cap Qdrant at 2GB so it can't squeeze the embedder.
+    mem_limit: 2g
+    cpus: 2.0
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]

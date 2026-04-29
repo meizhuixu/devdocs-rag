@@ -41,9 +41,12 @@ class Settings(BaseSettings):
     use_mock_llm: bool = Field(default=True)
     use_mock_embeddings: bool = Field(default=True)
 
-    # Embedding model
-    dense_model_name: str = Field(default="BAAI/bge-large-en-v1.5")
-    dense_dim: int = Field(default=1024)
+    # Embedding model — bge-base (768d) chosen over bge-large (1024d) to fit
+    # M3 Air thermal/RAM budget; MTEB delta is ~0.7. See ARCHITECTURE.md D6.
+    dense_model_name: str = Field(default="BAAI/bge-base-en-v1.5")
+    dense_dim: int = Field(default=768)
+    embed_batch_size: int = Field(default=32)
+    max_seq_length: int = Field(default=512)
 
     # Reranker model (fallback / local)
     cross_encoder_model: str = Field(default="cross-encoder/ms-marco-MiniLM-L-6-v2")
@@ -51,6 +54,10 @@ class Settings(BaseSettings):
     # Retrieval defaults
     retrieval_top_k: int = Field(default=20)
     rerank_top_k: int = Field(default=5)
+
+    # Ingestion flush boundaries — flush whichever fires first.
+    qdrant_flush_chunks: int = Field(default=256)
+    qdrant_flush_files: int = Field(default=32)
 
 
 @lru_cache(maxsize=1)

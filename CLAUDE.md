@@ -187,7 +187,8 @@ def do_thing() -> None:
 ### Retrieval: hybrid (BM25 + dense)
 - BM25 over raw tokens — catches exact symbol names (`register_buffer`, etc.)
   that semantic search smooths away.
-- Dense via `bge-large-en-v1.5` (1024-dim).
+- Dense via `bge-base-en-v1.5` (768-dim). See ARCHITECTURE.md D6 for the
+  bge-large → bge-base downsize (M3 Air thermal/RAM budget; MTEB delta ~0.7).
 - Fusion: reciprocal rank fusion (RRF) with `k=60`. Cheap and well-studied.
 
 ### Reranker

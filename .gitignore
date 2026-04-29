@@ -18,3 +18,4 @@ data/processed/
 .DS_Store
 *.log
 .claude/settings.local.json
+uv.lock

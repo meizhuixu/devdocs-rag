@@ -76,18 +76,15 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 
 ## Status
 
-**Phase 1 — scaffold (current).** No real LLM, no real embeddings.
+**Phase 2 — real ingestion (current).** Real `bge-base-en-v1.5` embeddings,
+real Qdrant writes, incremental re-index by `commit_sha`. Still mock LLM.
 
-- [x] Repo + module skeleton
-- [x] `docker-compose up` brings Qdrant + Redis online
-- [x] CI green (ruff + mypy + pytest)
-- [x] Mock pipeline runs end-to-end (mock embedder → empty retrieval → mock LLM → SSE)
-- [x] FastAPI `/health` and `/query/stream` live with mock client
-
-**Up next — Phase 2: real ingestion**
-- [ ] PyTorch docs corpus → `pytorch_docs` namespace
-- [ ] `bge-large-en-v1.5` via `sentence-transformers`
-- [ ] Hybrid (BM25 + dense) wired against real Qdrant collections
+- [x] Phase 1 scaffold (mock pipeline, FastAPI + SSE, CI green)
+- [x] PyTorch docs corpus → `pytorch_docs` namespace via sparse-checkout
+- [x] `bge-base-en-v1.5` via `sentence-transformers` (MPS-accelerated, Redis-cached)
+- [x] Qdrant collection bootstrap with payload indexes
+- [x] Incremental re-index: per-file `commit_sha` change detection
+- [ ] Hybrid (BM25 + dense) wired against real Qdrant collections (next)
 - [ ] First end-to-end query against a real index (still mock LLM)
 
 **Phase 3 — real LLM + reranker**
@@ -138,6 +135,58 @@ curl -N -X POST http://localhost:8000/query/stream \
 # 5. Or run the Streamlit UI
 streamlit run src/devdocs_rag/ui/streamlit_app.py
 ```
+
+### Ingest PyTorch docs (Phase 2)
+
+```bash
+# Sparse-checkout docs/source/ from the PyTorch repo (~30-60 MB)
+./scripts/fetch_pytorch_docs.sh
+
+# Smoke run on a single file (validates the whole pipeline)
+USE_MOCK_EMBEDDINGS=false uv run python -m devdocs_rag.ingestion \
+  --namespace pytorch_docs \
+  --source data/raw/pytorch/docs/source \
+  --repo-root data/raw/pytorch \
+  --smoke docs/source/notes/extending.rst
+
+# Full run
+USE_MOCK_EMBEDDINGS=false uv run python -m devdocs_rag.ingestion \
+  --namespace pytorch_docs \
+  --source data/raw/pytorch/docs/source \
+  --repo-root data/raw/pytorch
+```
+
+---
+
+## Known limitations / gaps
+
+**Phase 2 ingests static .rst content only — autodoc-rendered API reference is not yet covered.**
+
+PyTorch's documentation is built with Sphinx. Many `.rst` files in the API
+reference (e.g. `torch.rst`, `nn.rst`, `optim.rst`) are mostly directives like
+`.. autoclass:: torch.nn.Linear`; the actual prose comes from Python
+docstrings rendered at Sphinx build time. Static `.rst` parsing therefore
+captures the prose-heavy `notes/`, tutorials, and quantization guides, but
+**misses inline API documentation**.
+
+**What Phase 2 does cover:**
+- All of `docs/source/notes/*.rst` (~50 substantial tutorials)
+- `quantization.rst`, `distributed.rst`, `cuda.rst`, etc. (prose pages)
+- File-level prose surrounding autodoc directives
+
+**What Phase 2 does not cover:**
+- API reference pulled from Python docstrings via Sphinx autodoc
+- Examples embedded in autodoc'd docstrings
+
+**Planned remediation — Phase 2.5:** run `make html` against the PyTorch docs
+source and parse rendered HTML, then extract per-API-symbol chunks. Adds ~5
+min build cost and `sphinx + torch + sphinx_rtd_theme` to the ingestion env.
+Tracked as a Phase 2.5 milestone — not blocking Phase 3.
+
+A query like *"how does `nn.Linear` work?"* will currently return the
+notes/extending.rst chunk on subclassing `nn.Module` rather than the
+`nn.Linear` docstring. Notes-style questions ("how do I extend autograd?",
+"how do I write custom CUDA ops?") work as designed.
 
 ---
 

@@ -204,11 +204,15 @@ Every entry: **decision · alternatives considered · why this · when revisit**
 - **Revisit**: if we add notebook (.ipynb) support — needs a different
   splitter.
 
-### D6 — `bge-large-en-v1.5` (1024-d) as base embedder
+### D6 — `bge-base-en-v1.5` (768-d) as base embedder
 
-- **Alternatives**: `text-embedding-3-large` (OpenAI), `bge-small`, `e5-large`.
-- **Why bge-large**: open weights, strong on technical English, license-clean
-  for self-host. Phase 5 fine-tunes `bge-small` and shows the comparison.
+- **Alternatives**: `text-embedding-3-large` (OpenAI), `bge-large` (1024-d),
+  `bge-small`, `e5-large`.
+- **Why bge-base** (updated 2026-04-28, was bge-large): open weights, strong
+  on technical English, license-clean for self-host. **MTEB delta vs bge-large
+  is ~0.7**; the 3× model-size win matters on M3 Air with 16 GB (thermal +
+  RAM headroom for Qdrant + IDE). Phase 5 fine-tunes `bge-small` and shows
+  the comparison.
 - **Revisit**: when a clear successor ships with measurable recall gains.
 
 ### D7 — Phase 1 ships a mock LLM behind a Protocol
@@ -242,6 +246,37 @@ Every entry: **decision · alternatives considered · why this · when revisit**
 - **Why uv**: fast, lockfile-by-default, single source of dep truth in
   `pyproject.toml`. Matches CI install path.
 - **Revisit**: if uv stops being the consensus.
+
+### D11 — Qdrant payload indexes on namespace / file_path / commit_sha / chunk_type
+
+- **Alternatives**: no payload indexes (linear filter scan), index everything.
+- **Why these four**: the incremental-indexing algorithm filters on
+  `(namespace, file_path)` every run to fetch existing `commit_sha`. Query-time
+  filters on `(namespace, chunk_type)` for "search only my code in repo X".
+  Indexing other payload fields (`heading_path`, `symbol`, `level`) costs RAM
+  for queries we don't run.
+- **Revisit**: when we add full-text payload search ("show me chunks where
+  heading_path contains 'autograd'") — that field gets a `text` index then.
+
+### D12 — Qdrant is the checkpoint, not SQLite
+
+- **Alternatives**: SQLite sidecar, JSONL manifest in `data/processed/`.
+- **Why Qdrant**: it already holds `(file_path, commit_sha)` per chunk. A
+  scroll over `with_payload=["file_path","commit_sha"]` reconstructs "what's
+  done" in O(n_files) and is by definition consistent with what's actually
+  indexed. A separate checkpoint store creates a second source of truth that
+  can drift from Qdrant on crash.
+- **Revisit**: if `scroll_file_shas()` becomes a bottleneck at >1M chunks (it
+  won't for the user's corpus). Then add a dedicated metadata collection.
+
+### D13 — Phase 1 mock pipeline ships before Phase 2 real ingestion
+
+- **Alternatives**: skip Phase 1, build retrieval against real data.
+- **Why**: lets us prove FastAPI + SSE + CI + module boundaries with zero LLM
+  cost and zero data dependencies. The `Embedder` / `LLMClient` / `Reranker`
+  Protocols guarantee Phase 2/3 swap without callsite churn.
+- **Outcome**: Phase 2 turned out to be a pure swap of two `get_*()`
+  factories. No callsite changed. The Protocol design paid off.
 
 ---
 

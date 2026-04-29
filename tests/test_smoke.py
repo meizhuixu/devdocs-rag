@@ -28,7 +28,8 @@ def test_version_is_set() -> None:
 def test_settings_load_with_defaults() -> None:
     s = get_settings()
     assert s.use_mock_llm is True
-    assert s.dense_dim == 1024
+    assert s.dense_dim == 768  # bge-base
+    assert "bge-base" in s.dense_model_name
 
 
 def test_code_loader_chunks_python_functions(tmp_path: Path) -> None:
@@ -137,7 +138,8 @@ def test_ingestion_pipeline_walks_files(tmp_path: Path) -> None:
     (tmp_path / "readme.md").write_text("# Title\nbody\n")
     (tmp_path / "skip.bin").write_bytes(b"\x00\x01")
 
-    report = ingestion_run(namespace="test_ns", source_path=tmp_path)
+    # dry_run=True: walk + chunk only, no Qdrant connection.
+    report = ingestion_run(namespace="test_ns", source_path=tmp_path, dry_run=True)
     assert report.namespace == "test_ns"
     assert report.files_seen == 2
     assert report.files_indexed == 2
@@ -145,7 +147,7 @@ def test_ingestion_pipeline_walks_files(tmp_path: Path) -> None:
 
 
 def test_ingestion_pipeline_missing_path(tmp_path: Path) -> None:
-    report = ingestion_run(namespace="test_ns", source_path=tmp_path / "nope")
+    report = ingestion_run(namespace="test_ns", source_path=tmp_path / "nope", dry_run=True)
     assert report.files_seen == 0
 
 

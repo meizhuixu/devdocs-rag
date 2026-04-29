@@ -1,7 +1,8 @@
 """Dense embedding interface.
 
 Phase 1: returns deterministic pseudo-random vectors so tests are reproducible.
-Phase 2 swaps in `sentence-transformers` with `bge-large-en-v1.5`.
+Phase 2: swaps in `sentence-transformers` with `bge-base-en-v1.5` when the
+`USE_MOCK_EMBEDDINGS` flag is False.
 """
 
 from __future__ import annotations
@@ -9,9 +10,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import struct
-from typing import Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from devdocs_rag.config import get_settings
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +62,38 @@ class MockEmbedder:
 
 
 def get_embedder() -> Embedder:
-    """Phase 1: always returns MockEmbedder. Phase 2 wires the real one."""
+    """Return the active embedder.
+
+    `USE_MOCK_EMBEDDINGS=true` (Phase 1 default) → MockEmbedder.
+    `USE_MOCK_EMBEDDINGS=false` → SentenceTransformerEmbedder with Redis cache.
+    Redis unavailable degrades to no-cache (logs a warning, doesn't crash).
+    """
     settings = get_settings()
     if settings.use_mock_embeddings:
         return MockEmbedder(settings.dense_dim)
-    # TODO(Phase 2): return SentenceTransformerEmbedder(settings.dense_model_name)
-    return MockEmbedder(settings.dense_dim)
+
+    # Lazy imports keep Phase 1 / mock-mode test paths free of torch + redis.
+    from devdocs_rag.retrieval.sentence_transformer_embedder import (
+        SentenceTransformerEmbedder,
+    )
+
+    cache = _connect_cache(settings.redis_url)
+    return SentenceTransformerEmbedder(
+        model_name=settings.dense_model_name,
+        cache=cache,
+        batch_size=settings.embed_batch_size,
+        max_seq_length=settings.max_seq_length,
+    )
+
+
+def _connect_cache(redis_url: str) -> Redis[Any] | None:
+    """Try to connect to Redis. None if unreachable (caller embeds without cache)."""
+    try:
+        import redis
+
+        client: Redis[Any] = redis.from_url(redis_url)
+        client.ping()
+        return client
+    except Exception:
+        logger.warning("redis cache unreachable at %s — embedding without cache", redis_url)
+        return None
