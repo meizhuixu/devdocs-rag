@@ -76,16 +76,16 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 
 ## Status
 
-**Phase 2 — real ingestion (current).** Real `bge-base-en-v1.5` embeddings,
-real Qdrant writes, incremental re-index by `commit_sha`. Still mock LLM.
+🚧 **Phase 2 complete** — PyTorch docs corpus ingested. Hybrid retrieval (Phase 3) starting next.
 
-- [x] Phase 1 scaffold (mock pipeline, FastAPI + SSE, CI green)
-- [x] PyTorch docs corpus → `pytorch_docs` namespace via sparse-checkout
-- [x] `bge-base-en-v1.5` via `sentence-transformers` (MPS-accelerated, Redis-cached)
-- [x] Qdrant collection bootstrap with payload indexes
-- [x] Incremental re-index: per-file `commit_sha` change detection
-- [ ] Hybrid (BM25 + dense) wired against real Qdrant collections (next)
-- [ ] First end-to-end query against a real index (still mock LLM)
+**Demonstrated capabilities so far**:
+- Real-time embedding via bge-base-en-v1.5 on Apple Silicon MPS (~80 chunks/sec sustained)
+- Qdrant vector DB with payload-indexed filtering (namespace, file_path, commit_sha, chunk_type)
+- Idempotent incremental ingestion via per-file commit-sha diff (full re-index 145s, no-op re-run 11s)
+- Redis embedding cache (model-tag-keyed, content-addressable)
+- Per-namespace ignore-globs config for multi-source corpora
+
+**Corpus stats**: 253 files (177 .md + 73 .rst + 2 .py + 1 .txt), 2,133 chunks, 768-dim vectors.
 
 **Phase 3 — real LLM + reranker**
 - [ ] Anthropic streaming client behind `LLMClient` interface
