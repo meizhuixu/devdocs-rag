@@ -54,6 +54,7 @@ class HealthResponse(BaseModel):
     mock_llm: bool
     mock_embeddings: bool
     reranker_type: str
+    expose_retrieval_debug: bool
 
 
 def _chunk_summary(chunk: RetrievedChunk, snippet_len: int = 300) -> dict[str, Any]:
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
             mock_llm=settings.use_mock_llm,
             mock_embeddings=settings.use_mock_embeddings,
             reranker_type=settings.reranker_type,
+            expose_retrieval_debug=settings.expose_retrieval_debug,
         )
 
     @app.post("/query/stream")
