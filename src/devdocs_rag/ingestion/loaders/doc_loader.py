@@ -21,6 +21,67 @@ _MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 # and so on. Spec: https://devguide.python.org/documentation/markup/#sections
 _RST_ADORNMENT_CHARS = set('=-~`#"*^+:_')
 
+# Sphinx text roles (and `py:` domain variants) we strip from chunk text before
+# tokenization / embedding. The marker syntax pollutes BM25 token sets and
+# muddies dense embeddings without contributing to retrieval. See D19 in
+# ARCHITECTURE.md for the design choice (regex over a fixed role list, not a
+# full docutils parse).
+_RST_ROLES = (
+    "ref",
+    "class",
+    "mod",
+    "func",
+    "meth",
+    "attr",
+    "exc",
+    "obj",
+    "data",
+    "const",
+    "doc",
+    "term",
+    "envvar",
+    "option",
+    "file",
+    "samp",
+    "guilabel",
+    "kbd",
+    "menuselection",
+)
+_RST_ROLE_RE = re.compile(r":(?:py:)?(?:" + "|".join(_RST_ROLES) + r"):`([^`]+)`")
+
+
+def _replace_rst_role(match: re.Match[str]) -> str:
+    """Replacement function for `_RST_ROLE_RE.sub`.
+
+    Returns just the displayable text:
+    - `:class:`Foo``                 → "Foo"
+    - `:class:`~torch.nn.Linear``    → "torch.nn.Linear"
+      (we strip only the leading `~` and KEEP the full module path; better
+      BM25 recall on dotted symbol queries than the Sphinx-display "Linear")
+    - `:ref:`hooks <my-hooks>``      → "hooks"  (display label, drop target)
+    - `:py:class:`Foo``              → "Foo"
+    """
+    content = match.group(1)
+    if "<" in content and content.rstrip().endswith(">"):
+        display, _, _ = content.partition("<")
+        if display.strip():
+            return display.strip()
+    if content.startswith("~"):
+        content = content[1:]
+    return content
+
+
+def _clean_rst_text(source: str) -> str:
+    """Strip Sphinx role markup from raw source text.
+
+    Single-pass regex over the full file; no code-block awareness (the few
+    meta-doc cases where a `:role:` literal appears inside a code fence are
+    rare in practice and read fine post-strip anyway). Other RST markup
+    (single backtick literals, `*emphasis*`, `**strong**`, double-backtick
+    inline code) is intentionally left alone.
+    """
+    return _RST_ROLE_RE.sub(_replace_rst_role, source)
+
 
 class DocChunk(BaseModel):
     """A retrieval unit derived from a doc / markdown / rst file."""
@@ -105,6 +166,7 @@ def _build_heading_path(stack: list[str], level: int, title: str) -> list[str]:
 def load_doc_file(path: Path) -> list[DocChunk]:
     """Read a doc file, split on headings, track heading_path."""
     source = path.read_text(encoding="utf-8", errors="replace")
+    source = _clean_rst_text(source)
     lines = source.splitlines()
     headings = _extract_headings(path, source)
 

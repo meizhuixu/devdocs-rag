@@ -51,6 +51,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Walk + chunk only; no Qdrant writes",
     )
+    parser.add_argument(
+        "--force-reindex",
+        action="store_true",
+        help=(
+            "Bypass commit_sha skip — every file already in Qdrant gets "
+            "delete-then-reingested. Use after chunker logic changes "
+            "(e.g. RST cleaning) so existing chunks reflect the new transform."
+        ),
+    )
     args = parser.parse_args(argv)
 
     configure_logging()
@@ -60,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=args.repo_root,
         smoke_file=args.smoke,
         dry_run=args.dry_run,
+        force_reindex=args.force_reindex,
     )
     print(report.model_dump_json(indent=2))
     return 0 if not report.errors else 1
