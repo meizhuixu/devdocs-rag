@@ -278,21 +278,23 @@ Every entry: **decision · alternatives considered · why this · when revisit**
 - **Outcome**: Phase 2 turned out to be a pure swap of two `get_*()`
   factories. No callsite changed. The Protocol design paid off.
 
-### D14 — Qdrant server pinned to v1.13.6
+### D14 — Qdrant server pinned to v1.16.3
 
-- **Alternatives**: stay on v1.12.4 (Phase 1 default), bump to v1.16+ to fully
-  match the locally-installed `qdrant-client` 1.17.x.
-- **Why v1.13.x**: closes the v1.12.4 ↔ client v1.17.1 (5 minor) gap one
-  step at a time. Conservative bump — no storage-format risk on existing
-  data, and `docker compose pull && up -d` preserved all 2143 indexed
-  points without re-ingestion.
-- **Known residual**: client v1.17.1 still emits a warning against server
-  v1.13.6 (4 minors apart, policy is ≤1). To fully clear the warning we'd
-  need server v1.16.x or v1.17.x. Acceptable for now — functional behavior
-  is unaffected.
-- **Revisit**: when client crosses a major (v2.x) or when a future bump
-  lands a feature we want (e.g. native sparse vectors for hybrid search,
-  expected ~v1.15+).
+- **Alternatives**: stay on v1.12.4 (Phase 1 default), match the
+  locally-installed client exactly (v1.17.1).
+- **History**: bumped v1.12.4 → v1.13.6 first as a conservative one-step
+  hop. Policy review caught that v1.13.6 vs client v1.17.1 is still 4
+  minors apart (Qdrant policy: server ≤1 minor behind client), so a
+  second bump moved the server to v1.16.3 — within policy, while still
+  one minor below the client to avoid running on the very newest tag.
+  The two-step iteration is preserved in git history (commits `31d5942`
+  → this one) for the audit trail.
+- **Why v1.16.3 specifically**: latest patch in the v1.16 line; one
+  minor below the client v1.17.1, satisfying the policy without sitting
+  on bleeding-edge tags. No storage-format break across v1.12 → v1.16.
+- **Revisit**: when client crosses a major (v2.x), or when a future
+  bump lands a feature we want (e.g. native sparse vectors for hybrid
+  search, available in v1.10+ — already covered).
 
 ### D15 — Per-namespace ignore-globs (gitignore-style)
 
