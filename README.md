@@ -104,6 +104,33 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 
 ---
 
+## Retrieval Quality
+
+Sanity-probe results comparing raw hybrid retrieval (BM25 + dense + RRF) against hybrid + cross-encoder reranker, on 3 hand-picked queries against the `pytorch_docs` namespace (2,133 chunks). Hand-curated golden set with Ragas-based regression eval is Phase 5; this table is qualitative and based on n=3.
+
+| Query | Hybrid (RRF) only | + Cross-encoder rerank |
+|---|---|---|
+| `how do I write a custom autograd function` | 5/5 on-topic; pedagogical entry-point absent from top-5 | "When to use" promoted to #2; some literal-match drift at #1 |
+| `CUDA stream synchronization` | 4/5; most-relevant chunk (Stream Sanitizer) at #5 | 5/5; Stream Sanitizer promoted #5 → #2 |
+| `register_buffer` | 1/5 on-topic (corpus autodoc gap) | 2/5 on-topic; reranker emits negative logits at #2-#5, calibrated signal that corpus lacks strong match |
+
+**Latency** (M3 MacBook Air, MPS, single namespace, top_k=50→5):
+
+| Stage | Latency |
+|---|---|
+| Cold start (BM25 build + bge model load + cross-encoder load) | ~4.4 s |
+| Warm hybrid only (BM25 + dense + RRF) | ~20 ms |
+| Warm hybrid + rerank | ~720 ms (cross-encoder predict on 50 pairs dominates) |
+
+**What this shows**:
+- Reranker promotes pedagogical entry-points and exact-tool-name matches that pure RRF buries (Q1, Q2)
+- On the corpus's known weakness (autodoc-rendered API references not yet ingested — see Limitations), reranker honestly signals low confidence via negative logits rather than hallucinating relevance (Q3)
+- ~700 ms reranker overhead is acceptable for an interactive Streamlit demo; production deployment with Cohere Rerank API (Phase 4) would cut this to <100 ms
+
+Reproducible via `python scripts/probe_retrieval.py` after running ingestion.
+
+---
+
 ## Roadmap (planned demo questions)
 
 > "How did I handle AWS Cognito session refresh in the CSYE6225 project?"
