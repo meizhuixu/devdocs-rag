@@ -51,9 +51,10 @@ class Settings(BaseSettings):
     # Reranker model (fallback / local)
     cross_encoder_model: str = Field(default="cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-    # Retrieval defaults
-    retrieval_top_k: int = Field(default=20)
-    rerank_top_k: int = Field(default=5)
+    # Retrieval defaults — pre-rerank pool size (BM25 + dense each return this many).
+    # M2 will add rerank_top_k for the final output count and reranker_type for dispatch.
+    retriever_top_k: int = Field(default=50)
+    rerank_top_k: int = Field(default=10)
 
     # Ingestion flush boundaries — flush whichever fires first.
     qdrant_flush_chunks: int = Field(default=256)

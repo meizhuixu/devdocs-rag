@@ -61,16 +61,28 @@ class MockEmbedder:
         return floats[: self._dim]
 
 
+_EMBEDDER_SINGLETON: Embedder | None = None
+
+
 def get_embedder() -> Embedder:
-    """Return the active embedder.
+    """Return the active embedder, cached per-process after first call.
 
     `USE_MOCK_EMBEDDINGS=true` (Phase 1 default) → MockEmbedder.
     `USE_MOCK_EMBEDDINGS=false` → SentenceTransformerEmbedder with Redis cache.
     Redis unavailable degrades to no-cache (logs a warning, doesn't crash).
+
+    Process-level caching matters for the interactive retrieval path: every
+    call into `dense_search()` would otherwise reload bge-base from disk
+    (~2.5s on M3 MPS) and burn the cold-start cost on every query.
     """
+    global _EMBEDDER_SINGLETON
+    if _EMBEDDER_SINGLETON is not None:
+        return _EMBEDDER_SINGLETON
+
     settings = get_settings()
     if settings.use_mock_embeddings:
-        return MockEmbedder(settings.dense_dim)
+        _EMBEDDER_SINGLETON = MockEmbedder(settings.dense_dim)
+        return _EMBEDDER_SINGLETON
 
     # Lazy imports keep Phase 1 / mock-mode test paths free of torch + redis.
     from devdocs_rag.retrieval.sentence_transformer_embedder import (
@@ -78,12 +90,19 @@ def get_embedder() -> Embedder:
     )
 
     cache = _connect_cache(settings.redis_url)
-    return SentenceTransformerEmbedder(
+    _EMBEDDER_SINGLETON = SentenceTransformerEmbedder(
         model_name=settings.dense_model_name,
         cache=cache,
         batch_size=settings.embed_batch_size,
         max_seq_length=settings.max_seq_length,
     )
+    return _EMBEDDER_SINGLETON
+
+
+def _reset_embedder_for_tests() -> None:
+    """Drop the cached embedder. Tests use this between cases."""
+    global _EMBEDDER_SINGLETON
+    _EMBEDDER_SINGLETON = None
 
 
 def _connect_cache(redis_url: str) -> Redis[Any] | None:
@@ -97,3 +116,33 @@ def _connect_cache(redis_url: str) -> Redis[Any] | None:
     except Exception:
         logger.warning("redis cache unreachable at %s — embedding without cache", redis_url)
         return None
+
+
+def dense_search(
+    query: str,
+    namespace: str,
+    top_k: int,
+    embedder: Embedder | None = None,
+) -> list[tuple[str, float]]:
+    """Embed `query` and run a Qdrant nearest-neighbour search in `namespace`.
+
+    Returns `[(point_id, cosine_score), ...]` sorted desc. The collection name
+    is the namespace itself (one collection per namespace by convention), so
+    no payload filter is needed.
+    """
+    settings = get_settings()
+    if embedder is None:
+        embedder = get_embedder()
+    vector = embedder.embed([query])[0]
+
+    from qdrant_client import QdrantClient
+
+    client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+    response = client.query_points(
+        collection_name=namespace,
+        query=vector,
+        limit=top_k,
+        with_payload=False,
+        with_vectors=False,
+    )
+    return [(str(p.id), float(p.score)) for p in response.points]

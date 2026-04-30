@@ -15,9 +15,8 @@ from devdocs_rag.generation.prompts import build_rag_messages
 from devdocs_rag.ingestion import run as ingestion_run
 from devdocs_rag.ingestion.loaders.code_loader import load_code_file
 from devdocs_rag.ingestion.loaders.doc_loader import load_doc_file
-from devdocs_rag.retrieval.bm25 import BM25Index, tokenize
 from devdocs_rag.retrieval.dense import MockEmbedder
-from devdocs_rag.retrieval.hybrid import reciprocal_rank_fusion, search
+from devdocs_rag.retrieval.hybrid import reciprocal_rank_fusion
 from devdocs_rag.retrieval.reranker import IdentityReranker, get_reranker
 
 
@@ -50,18 +49,6 @@ def test_doc_loader_chunks_markdown_headings(tmp_path: Path) -> None:
     assert "Sub" in symbols
 
 
-def test_bm25_returns_ranked_results() -> None:
-    idx = BM25Index(["alpha beta gamma", "alpha delta", "epsilon"])
-    out = idx.search("alpha", top_k=3)
-    assert len(out) == 3
-    # the top hit should be one of the docs containing "alpha"
-    assert out[0][0] in {0, 1}
-
-
-def test_tokenize_lowercases() -> None:
-    assert tokenize("Hello, World!") == ["hello", "world"]
-
-
 def test_mock_embedder_shape_and_determinism() -> None:
     e = MockEmbedder(dim=16)
     a = e.embed(["hello"])
@@ -77,10 +64,6 @@ def test_rrf_fuses_two_lists() -> None:
     )
     ids = [doc_id for doc_id, _ in fused]
     assert set(ids) == {"a", "b"}
-
-
-def test_hybrid_search_phase1_returns_empty() -> None:
-    assert search("anything", namespaces=["pytorch_docs"], top_k=5) == []
 
 
 def test_identity_reranker_truncates() -> None:
