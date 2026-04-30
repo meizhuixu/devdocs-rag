@@ -142,3 +142,36 @@ def test_health_endpoint() -> None:
         body = resp.json()
         assert body["status"] == "ok"
         assert body["mock_llm"] is True
+
+
+def test_query_stream_emits_retrieved_then_tokens_then_done() -> None:
+    """Mock-mode SSE: retrieved (empty chunks) → token... → done.
+
+    Locks the event-order contract Streamlit and any other client will rely on.
+    Mock mode means retrieval short-circuits to empty chunks; the test still
+    verifies the structural envelope.
+    """
+    app = create_app()
+    events: list[tuple[str, str]] = []
+    with TestClient(app) as client:
+        with client.stream(
+            "POST",
+            "/query/stream",
+            json={"question": "anything", "top_k": 5},
+            headers={"Accept": "text/event-stream"},
+        ) as resp:
+            assert resp.status_code == 200
+            current_event: str | None = None
+            for line in resp.iter_lines():
+                if not line:
+                    current_event = None
+                    continue
+                if line.startswith("event:"):
+                    current_event = line.split(":", 1)[1].strip()
+                elif line.startswith("data:") and current_event is not None:
+                    events.append((current_event, line.split(":", 1)[1].lstrip()))
+
+    event_types = [e for e, _ in events]
+    assert event_types[0] == "retrieved"
+    assert "token" in event_types
+    assert event_types[-1] == "done"

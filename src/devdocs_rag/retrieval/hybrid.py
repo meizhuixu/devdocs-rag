@@ -32,6 +32,20 @@ class RetrievedChunk(BaseModel):
     metadata: dict[str, str] = Field(default_factory=dict)
 
 
+class RetrievalDebug(BaseModel):
+    """Intermediate retrieval stages, exposed when settings.expose_retrieval_debug is on.
+
+    Each list is `(doc_id, score)` pairs in their respective ranking order:
+    - `bm25_top` and `dense_top` are the raw retriever outputs (truncated to
+      `retriever_top_k`).
+    - `rrf_top` is the rank-aware RRF fusion before any truncation/rerank.
+    """
+
+    bm25_top: list[tuple[str, float]] = Field(default_factory=list)
+    dense_top: list[tuple[str, float]] = Field(default_factory=list)
+    rrf_top: list[tuple[str, float]] = Field(default_factory=list)
+
+
 def reciprocal_rank_fusion(
     *ranked_lists: Iterable[tuple[str, float]], k: int = RRF_K
 ) -> list[tuple[str, float]]:
@@ -88,12 +102,32 @@ def search(
 ) -> list[RetrievedChunk]:
     """Run hybrid retrieval and hydrate the top_k payloads.
 
+    Wrapper around `search_with_debug` that drops the debug payload — kept as
+    a stable narrow API for tests / probe scripts that don't need debug.
+    """
+    chunks, _ = search_with_debug(query, namespaces, top_k)
+    return chunks
+
+
+def search_with_debug(
+    query: str,
+    namespaces: list[str],
+    top_k: int = 10,
+) -> tuple[list[RetrievedChunk], RetrievalDebug]:
+    """Run hybrid retrieval and return both the hydrated chunks and the
+    intermediate BM25 / dense / RRF stages.
+
+    Used by /query/stream when `expose_retrieval_debug=true` so the UI can
+    show the four-layer (BM25 / dense / RRF / reranked) comparison side by
+    side.
+
     Phase 3 supports a single namespace. Multi-namespace cross-RRF + per-NS
     hydration is Phase 4 work — surfaced explicitly so callers don't silently
     get a single-namespace result when they expected multi.
     """
+    debug = RetrievalDebug()
     if not query.strip() or not namespaces:
-        return []
+        return [], debug
     if len(namespaces) > 1:
         # TODO(Phase 4): per-namespace BM25/dense → cross-namespace RRF →
         # per-pair namespace tracking for hydration.
@@ -107,8 +141,14 @@ def search(
 
     bm25_hits = get_bm25_index(namespace).search(query, top_k=pool_size)
     dense_hits = dense_search(query, namespace, top_k=pool_size)
+    rrf_full = hybrid_fuse(bm25_hits, dense_hits)
+    fused = rrf_full[:top_k]
 
-    fused = hybrid_fuse(bm25_hits, dense_hits)[:top_k]
+    debug = RetrievalDebug(
+        bm25_top=bm25_hits,
+        dense_top=dense_hits,
+        rrf_top=rrf_full[:top_k],
+    )
 
     logger.info(
         "hybrid: namespace=%s bm25=%d dense=%d fused=%d returning=%d",
@@ -120,9 +160,9 @@ def search(
     )
 
     if not fused:
-        return []
+        return [], debug
 
-    return _hydrate_chunks(fused, namespace)
+    return _hydrate_chunks(fused, namespace), debug
 
 
 def _hydrate_chunks(pairs: list[tuple[str, float]], namespace: str) -> list[RetrievedChunk]:

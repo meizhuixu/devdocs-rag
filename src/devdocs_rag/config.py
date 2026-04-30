@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # TODO(Phase 4): add "cohere" once we wire CohereReranker.
     reranker_type: Literal["cross_encoder", "identity"] = Field(default="cross_encoder")
 
+    # When true, /query/stream emits the BM25 / dense / RRF / reranked debug
+    # payload alongside the final chunks. Default false (production hygiene);
+    # the Streamlit UI exposes a collapsed expander only when this is on.
+    expose_retrieval_debug: bool = Field(default=False)
+
     # Ingestion flush boundaries — flush whichever fires first.
     qdrant_flush_chunks: int = Field(default=256)
     qdrant_flush_files: int = Field(default=32)

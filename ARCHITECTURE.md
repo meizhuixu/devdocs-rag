@@ -22,7 +22,7 @@ flowchart LR
     subgraph Ingestion
         L[Loader\nclassify code/doc]
         C[Chunker\nAST or semantic]
-        E[Embedder\nbge-large-en-v1.5]
+        E[Embedder\nbge-base-en-v1.5]
         S[commit_sha skip]
     end
 
@@ -33,9 +33,9 @@ flowchart LR
 
     subgraph Query
         API[FastAPI + SSE]
-        H[Hybrid retrieval\nBM25 + Dense + RRF]
-        RR[Reranker\nCohere or cross-encoder]
-        LLM[LLM\nAnthropic Claude / Mock]
+        H[Hybrid retrieval\nBM25Okapi + bge-base/Qdrant\n+ RRF k=60]
+        RR[Reranker\ncross-encoder ms-marco-MiniLM-L-6-v2\nPhase 3 · Cohere in Phase 4]
+        LLM[LLM\nMockLLMClient · Phase 4 swaps Anthropic]
     end
 
     U((User)) --> API
@@ -99,24 +99,18 @@ flowchart TD
 flowchart LR
     U((User)) --> API[POST /query/stream]
     API --> V[QueryRequest validation<br/>pydantic]
-    V --> H[Hybrid retrieval]
+    V --> H[Hybrid Retrieval<br/>BM25Okapi + bge-base/Qdrant<br/>+ RRF k=60]
 
-    H --> B[BM25<br/>per namespace]
-    H --> D[Dense<br/>per namespace]
-    B --> F[RRF fusion]
+    H --> B[BM25Okapi<br/>per-namespace<br/>scroll-rebuilt at startup]
+    H --> D[Dense<br/>bge-base-en-v1.5<br/>via Qdrant query_points]
+    B --> F[RRF fusion<br/>k=60 · rank-aware tie-break]
     D --> F
 
-    F --> RR{Cohere key set?}
-    RR -- yes --> RC[Cohere Rerank]
-    RR -- no --> RX[cross-encoder fallback]
-    RC --> P[Build prompt<br/>system + context + question]
-    RX --> P
+    F --> RR[Reranker<br/>cross-encoder ms-marco-MiniLM-L-6-v2<br/>MPS · top_50 → top_10]
+    RR --> P[Build prompt<br/>system + context + question]
 
-    P --> M{USE_MOCK_LLM?}
-    M -- yes --> MK[MockLLMClient]
-    M -- no --> AN[AnthropicClient]
-    MK --> S[SSE token stream]
-    AN --> S
+    P --> MK[MockLLMClient · Phase 3<br/>Phase 4 swaps Anthropic]
+    MK --> S[SSE: retrieved → tokens → done]
     S --> U
 ```
 
@@ -316,6 +310,67 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   namespaces will use in Phase 4.
 - **Revisit**: if we hit a pattern we can't express (e.g. `!keep.py`
   inside an ignored dir), swap to `pathspec` then.
+
+### D16 — BM25 in-memory, rebuilt from Qdrant scroll at API startup
+
+- **Alternatives**: persist a serialized BM25 index alongside Qdrant; build
+  on first query (lazy, but visible latency on the first request); rebuild
+  from a separate corpus file.
+- **Why in-memory + scroll-rebuild**: 2,133 chunks → ~10 MB resident, ~1 s
+  rebuild from a single Qdrant scroll (verified empirically). FastAPI
+  lifespan primes the registry before serving traffic, so first-query
+  latency is the same as warm. Persistence would require a serialization
+  format choice + version-compat handling + drift-detection vs Qdrant; not
+  worth it at this scale.
+- **Concurrency**: `_bm25_registry.get_bm25_index()` uses double-checked
+  locking so concurrent first-callers don't double-build.
+- **Refresh after re-ingestion**: out of Phase 3 scope. Restart the API
+  process to pick up new chunks. Phase 4 will add an `/admin/reload`
+  endpoint when multi-namespace incremental updates need it.
+- **Revisit**: if rebuild crosses ~5 s (i.e. corpus reaches ~10 k chunks
+  with high token counts) or if multi-namespace bring-up makes startup
+  unacceptable. Then switch to a persisted artifact + checksum check.
+
+### D17 — RRF k=60, rank-aware deterministic tie-break
+
+- **Alternatives**: weighted-sum fusion (BM25_score + α × cosine), learned
+  reranker as fusion, raw-score tiebreaker.
+- **Why RRF k=60**: Cormack et al. (2009) — parameter-free across retrievers
+  with vastly different score distributions. k=60 is the literature default,
+  matched by Elasticsearch / Vespa / Weaviate. Weighted-sum would require
+  hand-tuning weights per namespace; learned ranker is a Phase 5 question.
+- **Why rank-aware tie-break (not raw-score)**: BM25 (0..30, unbounded)
+  and cosine similarity (-1..1, real range ~0.4..0.9) live on incompatible
+  scales — a raw-score tiebreaker mixes apples and oranges. Tie key is
+  `(-fused_score, min(bm25_rank, dense_rank), doc_id)`: same axis as RRF
+  itself (rank), and `doc_id` is the deterministic anchor.
+- **Empty-list guards**: BM25 or dense returning zero hits is treated as
+  "skip in fusion" so the surviving list's rank order passes through
+  monotonically. BM25 with all-zero scores (query had no in-vocab tokens)
+  filters out at the BM25Index level via `score > 0`.
+- **Revisit**: if a learned ranker (e.g. ColBERT-as-retriever, SPLADE)
+  measurably beats RRF on the Phase 5 golden set.
+
+### D18 — Local cross-encoder for Phase 3, Cohere deferred to Phase 4
+
+- **Alternatives**: ship Cohere Rerank API on day one (production-grade,
+  ~100 ms p50); skip rerank entirely in Phase 3.
+- **Why local first**: keeps Phase 3 hermetic — no API key, no network
+  dependency, no billing — while still proving the reranker delivers
+  measurable quality lift over raw RRF (verified by M2 probe: Stream
+  Sanitizer #5→#2 on the CUDA query, register_buffer noise pruned). The
+  cross-encoder model is `cross-encoder/ms-marco-MiniLM-L-6-v2` — ~90 MB
+  on disk, ~150 MB on MPS, ~700 ms per top-50 rerank pass on M3 MPS.
+- **Why Cohere in Phase 4**: production deployment hits public network and
+  scales beyond a single MPS device. Cohere `rerank-english-v3.0` p50 is
+  ~100 ms for top-50 (~7× faster than local cross-encoder), better
+  quality on out-of-domain queries.
+- **Switch cost**: 5 lines + a new `cross_encoder_reranker.py`-shaped file
+  for Cohere. Both implement the `Reranker` Protocol; the dispatcher in
+  `reranker.py` already branches on `settings.reranker_type`; tests use
+  `identity` reranker via `tests/conftest.py` so neither path runs in CI.
+- **Revisit**: when Phase 4 lands. The local cross-encoder stays as a
+  no-API-key fallback for offline / self-host scenarios.
 
 ---
 
