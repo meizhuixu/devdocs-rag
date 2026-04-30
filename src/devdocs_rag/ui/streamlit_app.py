@@ -282,7 +282,16 @@ def main() -> None:
                 _render_chunk(chunk)
 
             st.subheader("Answer")
-            st.write_stream(token_gen)
+            # st.write_stream batches deltas inside the click handler — tokens
+            # collapse into a single render at the end. Explicit placeholder +
+            # per-yield .markdown() forces a WebSocket frame per token, the
+            # Streamlit-canonical typewriter pattern. Confirmed via timing probe:
+            # tokens arrive evenly spaced ~10ms apart from the SSE generator.
+            answer_placeholder = st.empty()
+            accumulated = ""
+            for token in token_gen:
+                accumulated += token
+                answer_placeholder.markdown(accumulated)
 
             if "debug" in retrieved:
                 _render_debug(retrieved["debug"])
