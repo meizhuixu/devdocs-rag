@@ -58,8 +58,13 @@ class Settings(BaseSettings):
 
     # Reranker dispatch. Production default: cross_encoder (local, ~150MB MPS).
     # Tests override to "identity" via conftest.py so they don't load the model.
-    # TODO(Phase 4): add "cohere" once we wire CohereReranker.
+    # TODO(Phase 6): add "cohere" once we wire CohereReranker.
     reranker_type: Literal["cross_encoder", "identity"] = Field(default="cross_encoder")
+
+    # Namespaces the API primes at lifespan startup AND uses as the default
+    # search scope when QueryRequest.namespaces is empty. Order matters only
+    # for startup logging — search treats them as a set.
+    default_namespaces: list[str] = Field(default_factory=lambda: ["pytorch_docs"])
 
     # When true, /query/stream emits the BM25 / dense / RRF / reranked debug
     # payload alongside the final chunks. Default false (production hygiene);

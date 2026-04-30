@@ -1,19 +1,18 @@
 """In-memory BM25 cache, one index per namespace.
 
 Built lazily on first call (`get_bm25_index`); the FastAPI lifespan hook
-calls `prime_namespace()` so the cost is paid once at startup rather than
-on the first user query.
+calls `prime_namespaces()` so the cost is paid once at startup rather
+than on the first user query.
 
-Source-of-truth for the indexed corpus is Qdrant — we just rebuild from a
-scroll. After re-ingestion, restart the API to refresh the index. Phase 4
-adds an admin reload endpoint when multi-namespace incremental updates
-need it.
+Source-of-truth for the indexed corpus is Qdrant — we just rebuild from
+a scroll. After re-ingestion, restart the API to refresh the index.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Iterable
 
 from devdocs_rag.config import get_settings
 from devdocs_rag.ingestion.qdrant_writer import QdrantWriter
@@ -39,8 +38,15 @@ def get_bm25_index(namespace: str) -> BM25Index:
 
 
 def prime_namespace(namespace: str) -> None:
-    """Eagerly build the index. FastAPI lifespan startup calls this."""
+    """Eagerly build the index for one namespace."""
     get_bm25_index(namespace)
+
+
+def prime_namespaces(namespaces: Iterable[str]) -> None:
+    """Prime multiple namespaces in sequence. Used by FastAPI lifespan."""
+    for ns in namespaces:
+        logger.info("priming BM25 namespace=%s", ns)
+        get_bm25_index(ns)
 
 
 def clear() -> None:
