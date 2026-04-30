@@ -91,6 +91,7 @@ def run(
     repo_root: Path | None = None,
     smoke_file: str | None = None,
     dry_run: bool = False,
+    force_reindex: bool = False,
 ) -> IngestionReport:
     """Run ingestion for one namespace.
 
@@ -103,6 +104,11 @@ def run(
             for the Phase 2 first-run validation.
         dry_run: walk + chunk only; no Qdrant connection, no writes. Used by
             unit tests so they don't need a live Qdrant.
+        force_reindex: bypass commit_sha skip — every file already in Qdrant
+            goes through delete-then-reingest. Use after chunker logic
+            changes (e.g. RST cleaning) so existing chunks reflect the
+            new transform. Redis embedding cache by content-sha256 still
+            saves work where chunk text didn't actually change.
     """
     settings = get_settings()
     started = time.monotonic()
@@ -145,12 +151,15 @@ def run(
 
     existing = writer.scroll_file_shas()
     ignore_globs = settings.namespace_ignore_globs.get(namespace, [])
+    if force_reindex:
+        logger.info("force_reindex=True: every existing file will be re-processed")
     state = IngestionState.from_dirs(
         source_path=source_path,
         repo_root=repo_root,
         existing=existing,
         suffixes=suffixes,
         ignore_globs=ignore_globs,
+        force_reindex=force_reindex,
     )
 
     if smoke_file is not None:

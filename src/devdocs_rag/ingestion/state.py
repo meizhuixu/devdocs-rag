@@ -113,9 +113,11 @@ class IngestionState:
         self,
         current: dict[str, str],
         existing: dict[str, str],
+        force_reindex: bool = False,
     ) -> None:
         self._current = current
         self._existing = existing
+        self._force_reindex = force_reindex
 
     @classmethod
     def from_dirs(
@@ -125,9 +127,10 @@ class IngestionState:
         existing: dict[str, str],
         suffixes: Iterable[str] = _DOC_SUFFIXES,
         ignore_globs: Iterable[str] = (),
+        force_reindex: bool = False,
     ) -> IngestionState:
         current = _scan_source(source_path, repo_root, suffixes, ignore_globs=ignore_globs)
-        return cls(current=current, existing=existing)
+        return cls(current=current, existing=existing, force_reindex=force_reindex)
 
     @property
     def current(self) -> dict[str, str]:
@@ -139,6 +142,11 @@ class IngestionState:
 
     @property
     def to_update(self) -> set[str]:
+        # force_reindex bypass: every file already in Qdrant goes through
+        # delete-then-reingest, regardless of commit_sha match. New files
+        # (in `current` but not `existing`) still flow via `to_add`.
+        if self._force_reindex:
+            return set(self._current) & set(self._existing)
         return {
             p
             for p in self._current
@@ -151,6 +159,8 @@ class IngestionState:
 
     @property
     def to_skip(self) -> set[str]:
+        if self._force_reindex:
+            return set()
         return {
             p
             for p in self._current
@@ -164,7 +174,7 @@ class IngestionState:
         """Return a new state limited to the given file paths (smoke run)."""
         current = {p: sha for p, sha in self._current.items() if p in file_paths}
         existing = {p: sha for p, sha in self._existing.items() if p in file_paths}
-        return IngestionState(current=current, existing=existing)
+        return IngestionState(current=current, existing=existing, force_reindex=self._force_reindex)
 
 
 __all__ = ["_CODE_SUFFIXES", "_DOC_SUFFIXES", "IngestionState", "matches_any_glob"]
