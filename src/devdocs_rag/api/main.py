@@ -31,13 +31,11 @@ from sse_starlette.sse import EventSourceResponse
 from devdocs_rag.config import configure_logging, get_settings
 from devdocs_rag.generation.llm_client import LLMMessage, MockLLMClient, get_llm_client
 from devdocs_rag.generation.prompts import build_rag_messages
-from devdocs_rag.retrieval._bm25_registry import prime_namespace
+from devdocs_rag.retrieval._bm25_registry import prime_namespaces
 from devdocs_rag.retrieval.hybrid import RetrievalDebug, RetrievedChunk, search_with_debug
 from devdocs_rag.retrieval.reranker import get_reranker
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_NAMESPACE = "pytorch_docs"
 
 
 class QueryRequest(BaseModel):
@@ -69,21 +67,22 @@ def _chunk_summary(chunk: RetrievedChunk, snippet_len: int = 300) -> dict[str, A
 
 
 def _build_chunk_summary_text(chunks: list[RetrievedChunk]) -> str:
-    """Mock-LLM response text that enumerates the file_path distribution.
+    """Mock-LLM response text that enumerates per-namespace chunk counts.
 
-    The point of this format: a Streamlit user looking at the chunk
-    expander above + the LLM stream below gets a double-confirmation that
-    retrieval really fired. Phase 4 replaces this with the real model.
+    Phase 4 multi-namespace format: the demo's visible proof that
+    retrieval crossed namespaces — namespace selection on the UI →
+    namespace breakdown in the answer → matches the chunks above.
     """
     if not chunks:
-        return "[mock-Phase-3] No chunks retrieved. Phase 4 wires Anthropic Claude here."
-    counts = Counter(c.path for c in chunks)
-    lines = [f"[mock-Phase-3] Retrieved {len(chunks)} chunks across {len(counts)} files:"]
-    for path, n in counts.most_common():
-        # U+00D7 multiplication sign is the demo-spec'd format; the noqa
-        # silences ruff's ambiguous-unicode check on the f-string.
-        lines.append(f"  - {path} (×{n})")  # noqa: RUF001
-    lines.append("Phase 4 wires Anthropic Claude here.")
+        return (
+            "[mock-Phase-4] No chunks retrieved. "
+            "Real LLM integration: Phase 6 (Anthropic Claude / DeepSeek-V3 via Volcano)."
+        )
+    ns_counts = Counter(c.namespace for c in chunks)
+    lines = [f"[mock-Phase-4] Multi-namespace search across {len(ns_counts)} namespaces:"]
+    for ns, n in ns_counts.most_common():
+        lines.append(f"  {ns}: {n} chunks")
+    lines.append("Real LLM integration: Phase 6 (Anthropic Claude / DeepSeek-V3 via Volcano).")
     return "\n".join(lines)
 
 
@@ -102,8 +101,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
         return
 
-    logger.info("API startup: priming BM25 for namespace=%s", DEFAULT_NAMESPACE)
-    prime_namespace(DEFAULT_NAMESPACE)
+    logger.info("API startup: priming namespaces=%s", settings.default_namespaces)
+    prime_namespaces(settings.default_namespaces)
     if settings.reranker_type != "identity":
         logger.info("API startup: warming reranker (%s)", settings.reranker_type)
         get_reranker()
@@ -135,7 +134,7 @@ def create_app() -> FastAPI:
 
     @app.post("/query/stream")
     async def query_stream(req: QueryRequest) -> EventSourceResponse:
-        ns = req.namespaces or [DEFAULT_NAMESPACE]
+        ns = req.namespaces or settings.default_namespaces
         logger.info(
             "query received: namespaces=%s top_k=%d question_len=%d",
             ns,
@@ -158,10 +157,22 @@ def create_app() -> FastAPI:
         }
         if settings.expose_retrieval_debug:
             retrieved_payload["debug"] = {
-                "bm25_top": [{"doc_id": did, "score": s} for did, s in debug.bm25_top],
-                "dense_top": [{"doc_id": did, "score": s} for did, s in debug.dense_top],
-                "rrf_top": [{"doc_id": did, "score": s} for did, s in debug.rrf_top],
-                "reranked_top": [{"file_path": c.path, "score": c.score} for c in reranked],
+                "bm25_top": [
+                    {"namespace": namespace, "doc_id": did, "score": s}
+                    for namespace, did, s in debug.bm25_top
+                ],
+                "dense_top": [
+                    {"namespace": namespace, "doc_id": did, "score": s}
+                    for namespace, did, s in debug.dense_top
+                ],
+                "rrf_top": [
+                    {"namespace": namespace, "doc_id": did, "score": s}
+                    for namespace, did, s in debug.rrf_top
+                ],
+                "reranked_top": [
+                    {"namespace": c.namespace, "file_path": c.path, "score": c.score}
+                    for c in reranked
+                ],
             }
 
         # Real chunks → mock LLM response that enumerates the file_path
