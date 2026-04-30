@@ -4,7 +4,7 @@
 > repos. Built as a personal knowledge base — dogfooded daily.
 
 [![CI](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml)
-![status: phase 1 — scaffold](https://img.shields.io/badge/status-phase%201%20scaffold-yellow)
+![status: phase 3 — complete](https://img.shields.io/badge/status-phase%203%20complete-brightgreen)
 ![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 
 ---
@@ -76,7 +76,7 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 
 ## Status
 
-🚧 **Phase 2 complete** — PyTorch docs corpus ingested. Hybrid retrieval (Phase 3) starting next.
+✅ **Phase 3 complete** — hybrid retrieval + local cross-encoder reranker + Streamlit UI live. LLM still mocked; Anthropic + Cohere ship in Phase 4.
 
 **Demonstrated capabilities so far**:
 - Real-time embedding via bge-base-en-v1.5 on Apple Silicon MPS (~80 chunks/sec sustained)
@@ -84,16 +84,26 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 - Idempotent incremental ingestion via per-file commit-sha diff (full re-index 145s, no-op re-run 11s)
 - Redis embedding cache (model-tag-keyed, content-addressable)
 - Per-namespace ignore-globs config for multi-source corpora
+- Hybrid retrieval (BM25Okapi + bge-base/Qdrant) fused via RRF (k=60) with rank-aware tie-break
+- Local cross-encoder reranker (ms-marco-MiniLM-L-6-v2, MPS) — verified quality lift over raw RRF
+- FastAPI `/query/stream` with SSE: `retrieved` event → token stream → `done`
+- Streamlit demo with chunk expanders + typewriter-style mock LLM answer + collapsed debug breakdown
 
 **Corpus stats**: 253 files (177 .md + 73 .rst + 2 .py + 1 .txt), 2,133 chunks, 768-dim vectors.
 
-**Phase 3 — real LLM + reranker**
-- [ ] Anthropic streaming client behind `LLMClient` interface
-- [ ] Cohere Rerank API + cross-encoder fallback
-- [ ] Streamlit UI proves the full streaming loop
+**Phase 3 — hybrid retrieval + local reranker** ✅
+- [x] BM25Okapi over Qdrant scroll, doc-id keyed (in-memory, primed at FastAPI startup)
+- [x] Dense via bge-base-en-v1.5 + Qdrant `query_points`
+- [x] Hybrid fusion: RRF k=60 with rank-aware deterministic tie-break
+- [x] Cross-encoder reranker (ms-marco-MiniLM-L-6-v2, local, MPS) behind Reranker Protocol
+- [x] FastAPI lifespan-primed startup; `/query/stream` SSE wires retrieval + rerank end-to-end
+- [x] Streamlit UI: chunks one-shot + answer typewriter (`st.empty()` placeholder pattern) + debug breakdown
+- [x] 5 hand-crafted sanity probes covering dense / BM25 / hybrid / broad scenarios (RUN_INTEGRATION-gated)
 
-**Phase 4 — multi-namespace**
-- [ ] Self-index `repo_devdocs_rag`
+**Phase 4 — production LLM + reranker + multi-namespace**
+- [ ] Anthropic streaming client behind the existing `LLMClient` Protocol
+- [ ] Cohere Rerank API behind the existing `Reranker` Protocol (cross-encoder stays as offline fallback)
+- [ ] Self-index `repo_devdocs_rag` (lift the single-namespace assertion in `hybrid.search`)
 - [ ] Add namespaces #1/#3/#4 as those projects come online
 - [ ] Add legacy `repo_csye6225`
 
@@ -128,6 +138,20 @@ Sanity-probe results comparing raw hybrid retrieval (BM25 + dense + RRF) against
 - ~700 ms reranker overhead is acceptable for an interactive Streamlit demo; production deployment with Cohere Rerank API (Phase 4) would cut this to <100 ms
 
 Reproducible via `python scripts/probe_retrieval.py` after running ingestion.
+
+![Streamlit demo](docs/screenshots/streamlit_demo_overview.png)
+*Streamlit UI: chunk retrieval, mock LLM file distribution, and debug breakdown (BM25 / Dense / RRF / Reranked).*
+
+---
+
+## Implementation Notes
+
+Engineering observations worth surfacing — found while wiring, not after-the-fact theory.
+
+- **Streaming UI**: Streamlit `st.write_stream` collapsed token yields due to delta-generator batching; switched to explicit `st.empty()` placeholder + per-yield `.markdown()` (Streamlit-canonical typewriter pattern). Server-side SSE flush + httpx transport are progressive (verified via timing probe — yields evenly spaced ~10 ms apart).
+- **SSE multi-line `data:`**: a token whose data contains `\n` is serialized as multiple `data:` lines on the wire per W3C SSE spec; the client parser must rejoin them with `\n` or the per-file chunk distribution renders as run-on text.
+- **Process-cached embedder + reranker**: without singleton caching, every API call re-loaded bge-base (~2.5 s on MPS) and the cross-encoder. The interactive retrieval path needs warm models; CLI ingestion doesn't import retrieval and stays unaffected.
+- **Mock-mode `/query/stream` short-circuit**: when `USE_MOCK_EMBEDDINGS=true`, retrieval skips the Qdrant call entirely. Lets the API run for plumbing demos with no Qdrant + keeps unit tests fast.
 
 ---
 
