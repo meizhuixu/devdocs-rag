@@ -148,15 +148,15 @@ def _check_health(api_url: str) -> dict[str, Any] | None:
 
 
 def _render_chunk(chunk: dict[str, Any]) -> None:
+    namespace = chunk.get("namespace", "?")
     path = chunk.get("file_path", "")
     heading = chunk.get("heading_path") or ""
-    title = f"{path} > {heading}" if heading else path
+    # `[ns]` prefix is always shown (consistency over conditional) — even with
+    # one namespace selected, it tags chunks with their source for the demo.
+    title_tail = f"{path} > {heading}" if heading else path
+    title = f"[{namespace}] {title_tail}"
     with st.expander(title):
-        st.caption(
-            f"score = {chunk.get('score', 0.0):.4f}  ·  "
-            f"namespace = {chunk.get('namespace', '?')}  ·  "
-            f"symbol = {chunk.get('symbol', '?')}"
-        )
+        st.caption(f"score = {chunk.get('score', 0.0):.4f}  ·  symbol = {chunk.get('symbol', '?')}")
         snippet = chunk.get("snippet", "")
         st.text(snippet)
 
@@ -180,7 +180,11 @@ def _render_debug(debug: dict[str, Any]) -> None:
             if reranked:
                 df = pd.DataFrame(
                     [
-                        {"file_path": d.get("file_path", ""), "score": d.get("score", 0.0)}
+                        {
+                            "ns": d.get("namespace", ""),
+                            "file_path": d.get("file_path", ""),
+                            "score": d.get("score", 0.0),
+                        }
                         for d in reranked[:10]
                     ]
                 )
@@ -190,10 +194,14 @@ def _render_debug(debug: dict[str, Any]) -> None:
 
 
 def _doc_score_df(items: list[dict[str, Any]]) -> pd.DataFrame:
-    """First-8-chars doc_id + score; top-10 only."""
+    """First-8-chars doc_id + score + namespace; top-10 only."""
     return pd.DataFrame(
         [
-            {"doc_id": str(d.get("doc_id", ""))[:8], "score": float(d.get("score", 0.0))}
+            {
+                "ns": str(d.get("namespace", "")),
+                "doc_id": str(d.get("doc_id", ""))[:8],
+                "score": float(d.get("score", 0.0)),
+            }
             for d in items[:10]
         ]
     )
