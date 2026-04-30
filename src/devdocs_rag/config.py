@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -52,9 +53,13 @@ class Settings(BaseSettings):
     cross_encoder_model: str = Field(default="cross-encoder/ms-marco-MiniLM-L-6-v2")
 
     # Retrieval defaults — pre-rerank pool size (BM25 + dense each return this many).
-    # M2 will add rerank_top_k for the final output count and reranker_type for dispatch.
     retriever_top_k: int = Field(default=50)
     rerank_top_k: int = Field(default=10)
+
+    # Reranker dispatch. Production default: cross_encoder (local, ~150MB MPS).
+    # Tests override to "identity" via conftest.py so they don't load the model.
+    # TODO(Phase 4): add "cohere" once we wire CohereReranker.
+    reranker_type: Literal["cross_encoder", "identity"] = Field(default="cross_encoder")
 
     # Ingestion flush boundaries — flush whichever fires first.
     qdrant_flush_chunks: int = Field(default=256)
