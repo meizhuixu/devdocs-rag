@@ -7,6 +7,7 @@ indexes are created on first creation; subsequent calls are no-ops.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from typing import Any
 
 from qdrant_client import QdrantClient
@@ -118,6 +119,31 @@ class QdrantWriter:
                 break
             offset = next_offset
         return result
+
+    def scroll_text_payloads(self) -> Iterator[tuple[str, str]]:
+        """Yield (point_id, text) for every point in the collection.
+
+        Streams via Qdrant scroll so memory stays bounded even on large collections.
+        Used by `BM25Index.from_qdrant` to rebuild the in-memory sparse index on
+        API startup.
+        """
+        offset: Any = None
+        while True:
+            points, next_offset = self._client.scroll(
+                collection_name=self._collection,
+                limit=1024,
+                with_payload=["text"],
+                with_vectors=False,
+                offset=offset,
+            )
+            for p in points:
+                payload = p.payload or {}
+                text = payload.get("text")
+                if isinstance(text, str) and text:
+                    yield str(p.id), text
+            if next_offset is None:
+                break
+            offset = next_offset
 
     def count(self) -> int:
         return self._client.count(collection_name=self._collection, exact=True).count
