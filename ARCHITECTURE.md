@@ -103,10 +103,11 @@ flowchart LR
 
     H --> B[BM25Okapi<br/>per-namespace<br/>scroll-rebuilt at startup]
     H --> D[Dense<br/>bge-base-en-v1.5<br/>via Qdrant query_points]
-    B --> F[RRF fusion<br/>k=60 · rank-aware tie-break]
+    B --> F[per-NS RRF<br/>k=60 · rank-aware tie-break]
     D --> F
+    F --> X[cross-NS RRF-of-RRF<br/>passthrough if 1 namespace]
 
-    F --> RR[Reranker<br/>cross-encoder ms-marco-MiniLM-L-6-v2<br/>MPS · top_50 → top_10]
+    X --> RR[Reranker<br/>cross-encoder ms-marco-MiniLM-L-6-v2<br/>MPS · top_50 → top_10]
     RR --> P[Build prompt<br/>system + context + question]
 
     P --> MK[MockLLMClient · Phase 3<br/>Phase 4 swaps Anthropic]
@@ -369,8 +370,74 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   for Cohere. Both implement the `Reranker` Protocol; the dispatcher in
   `reranker.py` already branches on `settings.reranker_type`; tests use
   `identity` reranker via `tests/conftest.py` so neither path runs in CI.
-- **Revisit**: when Phase 4 lands. The local cross-encoder stays as a
+- **Revisit**: when Phase 6 lands. The local cross-encoder stays as a
   no-API-key fallback for offline / self-host scenarios.
+
+### D19 — RST role stripping at the doc_loader layer
+
+- **Alternatives**: full `docutils` AST parse; per-source patches; leave
+  roles in chunk text and rely on tokenizer to split them.
+- **Why doc_loader regex**: `:class:`~torch.nn.Linear`` leaks tokens
+  like `class`, `mod`, `meth` into BM25 and pollutes dense embeddings.
+  Strip at the chunker so every namespace benefits — pytorch_docs and
+  user-repo namespaces alike. Regex over a fixed list of 19 Sphinx
+  roles in ~25 lines covers the 95% case without a heavyweight parse
+  library.
+- **Trade-off acknowledged**: M1 probe showed `register_buffer` raw
+  BM25 score collapsed -43% post-cleaning (the dirty corpus was
+  inflated by phantom `meth` / `class` tokens co-occurring with the
+  real symbol). Reranker compensates — top-1 chunk preserved
+  semantically. The recalibration is *honest*: cleaned BM25 reflects
+  actual lexical match, not phantom-token noise.
+- **Module-path policy**: `:class:`~torch.nn.Linear`` strips only the
+  leading `~`, KEEPS the full path → BM25 recall on dotted symbol
+  queries is preserved. Diverges from Sphinx-display semantics on
+  purpose.
+
+### D20 — Cross-namespace RRF-of-RRF, single-NS short-circuited
+
+- **Alternatives**: weighted-sum across namespaces; namespace as a
+  filter on a global RRF; learned cross-namespace ranker.
+- **Why RRF-of-RRF**: per-namespace fusion already produces clean
+  rank-ordered lists; treating those lists as inputs to a second RRF
+  preserves namespace independence and inherits the parameter-free
+  property. Doc IDs are namespace-unique by uuid5 construction, so a
+  flat `dict[doc_id, namespace]` is sufficient state.
+- **Tie-break**: same rank-axis philosophy as `hybrid_fuse` —
+  `(-cross_score, min_rank_across_ns, doc_id)`. Mixing raw-score
+  tiebreak across namespaces with different token distributions would
+  be a subtle bug.
+- **Single-NS short-circuit**: `len(namespaces) == 1` returns
+  `per_ns_fused[0]` directly, skipping cross-NS code entirely.
+  Bit-exact equivalent to the Phase 3 single-NS path — verified by
+  re-running M1 baseline probe post-M2 refactor (3 queries × 5 chunks
+  = 15 entries, all match to 4-decimal score precision).
+- **Revisit**: if cross-NS recall measurably improves with weighted
+  fusion (Phase 5 golden set + Ragas would tell us).
+
+### D21 — Self-indexing pattern: per-namespace ignore-globs + lifespan multi-prime
+
+- **Alternatives**: external corpus directories per namespace; a
+  separate ingestion config file; CLI-side ignore patterns.
+- **Why per-namespace globs in `Settings`**: the same ingestion
+  pipeline serves both docs corpora (`pytorch_docs`) and user-repo
+  corpora (`repo_devdocs_rag`, future repos). Their ignore patterns
+  diverge sharply — docs need `docs/source/scripts/**`, repos need
+  `.venv/**` + `node_modules/**` + `.git/**` + `__pycache__/**`.
+  A `dict[namespace, list[glob]]` keeps that tailoring without code
+  changes; lifespan walks `default_namespaces` so all configured
+  namespaces are primed at startup.
+- **Critical foot-gun (caught by M3 smoke run)**: `data/raw/**` MUST
+  appear in `repo_devdocs_rag` ignore-globs. Without it, walking `.`
+  recurses into `data/raw/pytorch/` and re-ingests the 21MB PyTorch
+  corpus into the wrong namespace. M3 smoke run on a single source
+  file before the full ingestion confirmed the filter caught 20,322
+  files (most of them PyTorch + .venv). Plan §H risk #1 paid off.
+- **Self-index outcome**: 44 source files → 264 chunks (182 code via
+  AST + 82 doc via heading split) in 22.5 s. Cross-NS sanity probes
+  verify queries route correctly across both namespaces (devdocs-rag
+  internal symbol → repo_devdocs_rag; CUDA stream sync → pytorch_docs
+  even with both NS in scope).
 
 ---
 
