@@ -64,7 +64,9 @@ class Settings(BaseSettings):
     # Namespaces the API primes at lifespan startup AND uses as the default
     # search scope when QueryRequest.namespaces is empty. Order matters only
     # for startup logging — search treats them as a set.
-    default_namespaces: list[str] = Field(default_factory=lambda: ["pytorch_docs"])
+    default_namespaces: list[str] = Field(
+        default_factory=lambda: ["pytorch_docs", "repo_devdocs_rag"]
+    )
 
     # When true, /query/stream emits the BM25 / dense / RRF / reranked debug
     # payload alongside the final chunks. Default false (production hygiene);
@@ -84,6 +86,24 @@ class Settings(BaseSettings):
             "pytorch_docs": [
                 "docs/source/scripts/**",
                 "docs/source/_static/**",
+            ],
+            # `data/raw/**` is the foot-gun: without it, self-indexing the
+            # repo would walk into data/raw/pytorch/ and re-ingest the 21MB
+            # PyTorch corpus into repo_devdocs_rag. See plan §H risk #1.
+            "repo_devdocs_rag": [
+                ".venv/**",
+                ".mypy_cache/**",
+                ".ruff_cache/**",
+                ".pytest_cache/**",
+                "qdrant_storage/**",
+                "data/raw/**",
+                "data/processed/**",
+                "**/__pycache__/**",
+                "*.egg-info/**",
+                ".git/**",
+                "docs/screenshots/**",
+                "uv.lock",
+                ".claude/settings.local.json",
             ],
         }
     )

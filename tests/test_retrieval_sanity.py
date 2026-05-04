@@ -46,6 +46,8 @@ class SanityProbe:
     expected_keyword_in_top5_text: str
     expected_file_path_substring: str
     description: str
+    namespaces: tuple[str, ...] = ("pytorch_docs",)
+    expected_namespace: str | None = None  # if set, top-5 must include ≥1 chunk in this ns
 
 
 PROBES: list[SanityProbe] = [
@@ -99,6 +101,33 @@ PROBES: list[SanityProbe] = [
             "that broad distributed-training docs are reachable."
         ),
     ),
+    # ----- Phase 4 cross-namespace probes -----
+    SanityProbe(
+        name="cross_ns_devdocs_self_code",
+        query="BM25Index from_qdrant scroll method",
+        expected_keyword_in_top5_text="bm25",
+        expected_file_path_substring="bm25",
+        description=(
+            "Cross-NS probe that should route to repo_devdocs_rag. The query "
+            "names internal code (BM25Index.from_qdrant); pytorch_docs has "
+            "no such symbol. Verifies cross-NS RRF doesn't misroute."
+        ),
+        namespaces=("pytorch_docs", "repo_devdocs_rag"),
+        expected_namespace="repo_devdocs_rag",
+    ),
+    SanityProbe(
+        name="cross_ns_pytorch_routing_under_multi",
+        query="CUDA stream synchronization",
+        expected_keyword_in_top5_text="cuda",
+        expected_file_path_substring="cuda",
+        description=(
+            "Cross-NS probe that must stay in pytorch_docs even when "
+            "repo_devdocs_rag is also in scope. Validates the cross-NS "
+            "RRF doesn't dilute the right-namespace result."
+        ),
+        namespaces=("pytorch_docs", "repo_devdocs_rag"),
+        expected_namespace="pytorch_docs",
+    ),
 ]
 
 
@@ -117,7 +146,7 @@ def test_sanity_probe(probe: SanityProbe) -> None:
 
     from devdocs_rag.retrieval.hybrid import search
 
-    chunks = search(probe.query, namespaces=["pytorch_docs"], top_k=5)
+    chunks = search(probe.query, namespaces=list(probe.namespaces), top_k=5)
     assert chunks, f"no chunks returned for {probe.query!r}"
 
     keyword = probe.expected_keyword_in_top5_text.lower()
@@ -138,3 +167,13 @@ def test_sanity_probe(probe: SanityProbe) -> None:
         f"  desc:   {probe.description}\n"
         f"  top-5 paths: {[c.path for c in chunks]}"
     )
+
+    if probe.expected_namespace is not None:
+        matched_ns = [c for c in chunks if c.namespace == probe.expected_namespace]
+        assert matched_ns, (
+            f"expected at least one chunk in top-5 from namespace "
+            f"{probe.expected_namespace!r}\n"
+            f"  query:  {probe.query!r}\n"
+            f"  desc:   {probe.description}\n"
+            f"  namespaces in top-5: {[c.namespace for c in chunks]}"
+        )
