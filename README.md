@@ -4,7 +4,7 @@
 > repos. Built as a personal knowledge base — dogfooded daily.
 
 [![CI](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml)
-![status: phase 3 — complete](https://img.shields.io/badge/status-phase%203%20complete-brightgreen)
+![status: phase 4 — complete](https://img.shields.io/badge/status-phase%204%20complete-brightgreen)
 ![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 
 ---
@@ -76,41 +76,50 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 
 ## Status
 
-✅ **Phase 3 complete** — hybrid retrieval + local cross-encoder reranker + Streamlit UI live. LLM still mocked; Anthropic + Cohere ship in Phase 4.
+✅ **Phase 4 complete** — multi-namespace cross-RRF retrieval + RST cleaning + self-indexed `repo_devdocs_rag`. LLM still mocked, cross-encoder reranker still local; Anthropic + Cohere ship in Phase 6.
 
 **Demonstrated capabilities so far**:
 - Real-time embedding via bge-base-en-v1.5 on Apple Silicon MPS (~80 chunks/sec sustained)
 - Qdrant vector DB with payload-indexed filtering (namespace, file_path, commit_sha, chunk_type)
 - Idempotent incremental ingestion via per-file commit-sha diff (full re-index 145s, no-op re-run 11s)
 - Redis embedding cache (model-tag-keyed, content-addressable)
-- Per-namespace ignore-globs config for multi-source corpora
+- Per-namespace ignore-globs + per-namespace BM25 indexes + cross-namespace RRF-of-RRF fusion
 - Hybrid retrieval (BM25Okapi + bge-base/Qdrant) fused via RRF (k=60) with rank-aware tie-break
 - Local cross-encoder reranker (ms-marco-MiniLM-L-6-v2, MPS) — verified quality lift over raw RRF
-- FastAPI `/query/stream` with SSE: `retrieved` event → token stream → `done`
-- Streamlit demo with chunk expanders + typewriter-style mock LLM answer + collapsed debug breakdown
+- RST role stripping at the doc_loader layer (18 Sphinx roles), with `--force-reindex` CLI for chunker-changed re-indexing
+- FastAPI `/query/stream` with SSE: `retrieved` event (with optional debug payload) → token stream → `done`
+- Streamlit demo with `[namespace]`-prefixed chunk expanders + typewriter-style mock LLM answer + collapsed debug breakdown
 
-**Corpus stats**: 253 files (177 .md + 73 .rst + 2 .py + 1 .txt), 2,133 chunks, 768-dim vectors.
+**Corpus stats**: pytorch_docs (253 files, 2,133 chunks) + repo_devdocs_rag (44 files, 264 chunks) = **2,397 chunks across 2 namespaces, 768-dim vectors**.
 
-**Phase 3 — hybrid retrieval + local reranker** ✅
-- [x] BM25Okapi over Qdrant scroll, doc-id keyed (in-memory, primed at FastAPI startup)
+**Phase 3 — hybrid retrieval + local reranker** ✅ *(merged)*
+- [x] BM25Okapi over Qdrant scroll, doc-id keyed
 - [x] Dense via bge-base-en-v1.5 + Qdrant `query_points`
 - [x] Hybrid fusion: RRF k=60 with rank-aware deterministic tie-break
-- [x] Cross-encoder reranker (ms-marco-MiniLM-L-6-v2, local, MPS) behind Reranker Protocol
-- [x] FastAPI lifespan-primed startup; `/query/stream` SSE wires retrieval + rerank end-to-end
-- [x] Streamlit UI: chunks one-shot + answer typewriter (`st.empty()` placeholder pattern) + debug breakdown
-- [x] 5 hand-crafted sanity probes covering dense / BM25 / hybrid / broad scenarios (RUN_INTEGRATION-gated)
+- [x] Cross-encoder reranker behind Reranker Protocol
+- [x] FastAPI lifespan-primed startup; `/query/stream` SSE end-to-end
+- [x] Streamlit UI with typewriter rendering + debug breakdown
+- [x] 5 hand-crafted sanity probes (RUN_INTEGRATION-gated)
 
-**Phase 4 — production LLM + reranker + multi-namespace**
-- [ ] Anthropic streaming client behind the existing `LLMClient` Protocol
-- [ ] Cohere Rerank API behind the existing `Reranker` Protocol (cross-encoder stays as offline fallback)
-- [ ] Self-index `repo_devdocs_rag` (lift the single-namespace assertion in `hybrid.search`)
-- [ ] Add namespaces #1/#3/#4 as those projects come online
-- [ ] Add legacy `repo_csye6225`
+**Phase 4 — multi-namespace + RST cleaning** ✅
+- [x] RST role stripping in doc_loader (18 Sphinx roles via regex)
+- [x] `--force-reindex` CLI flag for chunker-changed re-ingestion
+- [x] `cross_namespace_fuse` (RRF-of-RRF) with rank-aware tie-break
+- [x] Multi-namespace `search_with_debug` + per-namespace Qdrant hydration
+- [x] FastAPI lifespan multi-prime; QueryRequest namespace fallback
+- [x] Streamlit `[namespace]` chunk-title prefix + namespace-tagged debug DataFrames
+- [x] Self-indexed `repo_devdocs_rag` (44 files, 264 chunks); 2 cross-NS sanity probes
 
 **Phase 5 — eval gate + fine-tune**
-- [ ] 50-item hand-written golden set
+- [ ] 50-item hand-written golden set across both namespaces
 - [ ] Ragas regression in CI
 - [ ] Fine-tune `bge-small-en-v1.5` (contrastive); publish recall@10 vs base
+- [ ] Add 3 remaining namespaces: `repo_auto_sentinel`, `repo_devcontext_mcp`, `repo_csye6225`
+
+**Phase 6 — production LLM + reranker** *(deferred)*
+- [ ] Anthropic streaming client behind the existing `LLMClient` Protocol
+- [ ] DeepSeek-V3 via Volcano API as alternative provider
+- [ ] Cohere Rerank API behind the existing `Reranker` Protocol (cross-encoder stays as offline fallback)
 
 ---
 
@@ -149,6 +158,8 @@ Reproducible via `python scripts/probe_retrieval.py` after running ingestion.
 Engineering observations worth surfacing — found while wiring, not after-the-fact theory.
 
 - **Streaming UI**: Streamlit `st.write_stream` collapsed token yields due to delta-generator batching; switched to explicit `st.empty()` placeholder + per-yield `.markdown()` (Streamlit-canonical typewriter pattern). Server-side SSE flush + httpx transport are progressive (verified via timing probe — yields evenly spaced ~10 ms apart).
+- **RST cleaning recalibrates BM25**: Phase 4 stripped Sphinx role syntax (`:meth:`, `:class:`, etc.) from chunk text, eliminating phantom BM25 tokens that had been inflating scores on single-token queries. Raw hybrid scores recalibrated honestly (`register_buffer` -43% on top-1) — the cross-encoder reranker compensates by ranking on semantic relevance, preserving end-to-end retrieval quality.
+- **Self-indexing foot-gun**: `data/raw/**` MUST appear in `repo_devdocs_rag` ignore-globs — without it, walking `.` recurses into the 21MB PyTorch corpus and re-ingests it into the wrong namespace. Smoke-run on a single source file before the full ingestion (caught 20,322 filtered files; verified the data/raw cutoff fired).
 - **SSE multi-line `data:`**: a token whose data contains `\n` is serialized as multiple `data:` lines on the wire per W3C SSE spec; the client parser must rejoin them with `\n` or the per-file chunk distribution renders as run-on text.
 - **Process-cached embedder + reranker**: without singleton caching, every API call re-loaded bge-base (~2.5 s on MPS) and the cross-encoder. The interactive retrieval path needs warm models; CLI ingestion doesn't import retrieval and stays unaffected.
 - **Mock-mode `/query/stream` short-circuit**: when `USE_MOCK_EMBEDDINGS=true`, retrieval skips the Qdrant call entirely. Lets the API run for plumbing demos with no Qdrant + keeps unit tests fast.
