@@ -466,6 +466,31 @@ Every entry: **decision · alternatives considered · why this · when revisit**
 - **Revisit**: add auth (e.g. a shared secret header) if this server ever
   becomes multi-tenant or faces a public network.
 
+### D27 — Deterministic retrieval eval: recall@k, mrr@k, precision@k (Phase 5 M3)
+
+- **Alternatives**: Ragas full pipeline (LLM-as-judge for faithfulness/relevance),
+  manual inspection only.
+- **Why deterministic first**: the 50-item golden set has `relevant_chunks` ground
+  truth — no LLM call required. Deterministic metrics (recall, MRR, precision) are
+  free to run, reproducible in CI, and directly measure what the retriever does.
+  Ragas LLM-judge metrics (faithfulness, answer relevance) are deferred to Phase 6
+  when the real LLM lands.
+- **Match criterion**: `(namespace, path, symbol)` triple exact match. Code chunks
+  have deterministic symbols (function/class names via AST); doc chunks use the
+  heading symbol recorded at ingestion. A miss is a real retrieval failure, not
+  annotation noise.
+- **Metrics**: `recall@5`, `recall@10` (coverage), `mrr@10` (rank quality),
+  `precision@5` (precision). Implemented in `eval/metrics.py`.
+- **CI gate**: M3 is informational only — `continue-on-error: true` in `eval.yml`.
+  Gate hardens in Phase 6 once a recall@10 baseline is set against the live corpus.
+- **Graceful degradation**: if Qdrant is unavailable (CI without the service),
+  `ragas_runner.py` catches the connection error per query and marks it as skipped;
+  the step exits 0. A separate `--validate-only` mode validates JSONL structure
+  without any retrieval calls.
+- **Revisit**: when the real LLM ships (Phase 6), add Ragas faithfulness/relevance
+  on top of these deterministic metrics. If a learned ranker replaces RRF (D17),
+  re-run this eval to compare recall@10 on the golden set.
+
 ---
 
 ## 7. Open questions

@@ -300,10 +300,12 @@ devdocs-rag/
 │   └── ui/
 │       └── streamlit_app.py
 ├── tests/
-│   └── test_smoke.py
+│   ├── test_smoke.py
+│   └── test_eval_smoke.py           ← unit tests for eval/metrics.py
 ├── eval/
 │   ├── README.md
-│   ├── ragas_runner.py
+│   ├── metrics.py                   ← recall@k, mrr@k, precision@k (no LLM)
+│   ├── ragas_runner.py              ← golden-set runner → EvalReport
 │   └── datasets/
 │       └── golden_qa.jsonl
 └── data/

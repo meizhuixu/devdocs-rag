@@ -7,13 +7,32 @@ on:
       - "src/devdocs_rag/retrieval/**"
       - "src/devdocs_rag/generation/**"
       - "eval/datasets/**"
+      - "eval/metrics.py"
+      - "eval/ragas_runner.py"
 
 jobs:
-  ragas-regression:
+  eval-retrieval:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: TODO
-        run: |
-          echo "TODO(Phase 5): run eval/ragas_runner.py against eval/datasets/golden_qa.jsonl"
-          echo "Gate the PR on context_recall/faithfulness regression vs main."
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install deps
+        run: uv pip install -e ".[dev]" --system
+
+      - name: Validate golden dataset
+        # Verifies the JSONL is well-formed and all items parse correctly.
+        # Always runs — no Qdrant needed.
+        run: python -m eval.ragas_runner --dataset eval/datasets/golden_qa.jsonl --validate-only
+
+      - name: Run retrieval eval (informational — M3)
+        # Requires a live Qdrant instance with the indexed corpus.
+        # In CI without Qdrant, all 50 queries are skipped and the step exits 0.
+        # This gate becomes blocking in Phase 6 once a recall@10 baseline is set.
+        run: python -m eval.ragas_runner --dataset eval/datasets/golden_qa.jsonl --top-k 10
+        continue-on-error: true
+        env:
+          QDRANT_URL: "http://localhost:6333"
