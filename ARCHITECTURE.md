@@ -438,6 +438,11 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   verify queries route correctly across both namespaces (devdocs-rag
   internal symbol → repo_devdocs_rag; CUDA stream sync → pytorch_docs
   even with both NS in scope).
+- **Phase 5 M1 additions**: `repo_auto_sentinel` (52 files → 415 chunks,
+  53 files filtered) and `repo_devcontext_mcp` (21 files → 93 chunks,
+  1711 files filtered — mostly `.venv`). Total corpus: 4 namespaces,
+  2,905 chunks. 3 new sanity probes added (auto_sentinel_parse_log_node,
+  devcontext_mcp_search_codebase_tool, cross_ns_all_four_code_routing).
 
 ---
 

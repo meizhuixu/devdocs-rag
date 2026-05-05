@@ -1,28 +1,26 @@
-"""Phase 3 sanity probes — gated on RUN_INTEGRATION=1.
+"""Sanity probes — gated on RUN_INTEGRATION=1.
 
-Five hand-crafted lower-bound checks. **Not** a regression gate (Phase 5
-ships the 50-item golden set + Ragas). The point: if hybrid retrieval is
-so broken these don't pass, *something* is fundamentally wrong, and we
-catch it before staring at silent quality drift.
+Ten hand-crafted lower-bound checks across 4 namespaces. **Not** a
+regression gate (Phase 5 ships the 50-item golden set + deterministic
+recall@k eval). The point: if hybrid retrieval is so broken these don't
+pass, *something* is fundamentally wrong, and we catch it before staring
+at silent quality drift.
 
-Coverage spread (per Phase 3 plan §1.10):
-- 1 strong dense recall   (conceptual prose query)
-- 1 strong BM25 recall    (exact-symbol query, autodoc-gap aware)
-- 1 hybrid agreement      (both retrievers should converge)
-- 2 broader scenarios     (cross-section topical queries)
+Coverage spread:
+- Phase 3 (5 probes): pytorch_docs — dense / BM25 / hybrid / topical
+- Phase 4 (2 probes): cross-NS routing (repo_devdocs_rag vs pytorch_docs)
+- Phase 5 (3 probes): repo_auto_sentinel, repo_devcontext_mcp, 4-NS cross
 
 Each probe asserts two lower-bounds on `hybrid.search` top-5:
   - at least one chunk's text contains `expected_keyword_in_top5_text`
   - at least one chunk's file_path contains `expected_file_path_substring`
 
 These are deliberately loose. Reranker isn't applied — that's a separate
-quality dimension covered by the M2 probe comparison and (eventually)
-Phase 5's golden set.
+quality dimension covered by the golden set + Ragas eval (Phase 5 M3/M4).
 
 Requires:
-    docker compose up -d                                 # Qdrant
-    ./scripts/fetch_pytorch_docs.sh                       # corpus
-    USE_MOCK_EMBEDDINGS=false python -m devdocs_rag.ingestion ...
+    docker compose up -d
+    USE_MOCK_EMBEDDINGS=false python -m devdocs_rag.ingestion ...  (all 4 ns)
     RUN_INTEGRATION=1 USE_MOCK_EMBEDDINGS=false pytest tests/test_retrieval_sanity.py
 """
 
@@ -127,6 +125,57 @@ PROBES: list[SanityProbe] = [
         ),
         namespaces=("pytorch_docs", "repo_devdocs_rag"),
         expected_namespace="pytorch_docs",
+    ),
+    # ----- Phase 5 probes: new namespaces -----
+    SanityProbe(
+        name="auto_sentinel_parse_log_node",
+        query="parse JSON error log file validate fields",
+        expected_keyword_in_top5_text="parse",
+        expected_file_path_substring="parse_log",
+        description=(
+            "Targets repo_auto_sentinel nodes/parse_log.py — the parse_log "
+            "node reads and validates a JSON error log. Verifies the new "
+            "namespace is indexed and BM25 catches 'parse' + 'log' tokens."
+        ),
+        namespaces=("repo_auto_sentinel",),
+        expected_namespace="repo_auto_sentinel",
+    ),
+    SanityProbe(
+        name="devcontext_mcp_search_codebase_tool",
+        query="semantic search codebase MCP tool implementation",
+        # CLAUDE.md chunk (sym: "4. `search_codebase`") ranks #1; its text
+        # explicitly names the tool. The .py impl file is short (30 lines)
+        # and loses to the richer markdown docs in semantic ranking.
+        expected_keyword_in_top5_text="search_codebase",
+        expected_file_path_substring="CLAUDE",
+        description=(
+            "Targets repo_devcontext_mcp — the CLAUDE.md tool-description "
+            "chunk for search_codebase ranks #1 over the .py file because "
+            "markdown docs are semantically richer. Verifies the namespace "
+            "is indexed and routing to repo_devcontext_mcp is correct."
+        ),
+        namespaces=("repo_devcontext_mcp",),
+        expected_namespace="repo_devcontext_mcp",
+    ),
+    SanityProbe(
+        name="cross_ns_all_four_code_routing",
+        query="BM25 hybrid retrieval implementation",
+        # retrieval/__init__.py docstring: "Retrieval module: hybrid (BM25 + dense)
+        # + reranker." — BM25 appears in text; path contains "retrieval".
+        expected_keyword_in_top5_text="bm25",
+        expected_file_path_substring="retrieval",
+        description=(
+            "4-NS cross-namespace probe: devdocs_rag's retrieval/__init__.py "
+            "routes to repo_devdocs_rag even with all 4 namespaces in scope. "
+            "Validates cross-NS RRF-of-RRF at full namespace width."
+        ),
+        namespaces=(
+            "pytorch_docs",
+            "repo_devdocs_rag",
+            "repo_auto_sentinel",
+            "repo_devcontext_mcp",
+        ),
+        expected_namespace="repo_devdocs_rag",
     ),
 ]
 

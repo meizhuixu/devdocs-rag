@@ -90,7 +90,7 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 - FastAPI `/query/stream` with SSE: `retrieved` event (with optional debug payload) → token stream → `done`
 - Streamlit demo with `[namespace]`-prefixed chunk expanders + typewriter-style mock LLM answer + collapsed debug breakdown
 
-**Corpus stats**: pytorch_docs (253 files, 2,133 chunks) + repo_devdocs_rag (44 files, 264 chunks) = **2,397 chunks across 2 namespaces, 768-dim vectors**.
+**Corpus stats**: pytorch_docs (2,133 chunks) + repo_devdocs_rag (264 chunks) + repo_auto_sentinel (415 chunks) + repo_devcontext_mcp (93 chunks) = **2,905 chunks across 4 namespaces, 768-dim vectors**.
 
 **Phase 3 — hybrid retrieval + local reranker** ✅ *(merged)*
 - [x] BM25Okapi over Qdrant scroll, doc-id keyed
@@ -110,11 +110,12 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 - [x] Streamlit `[namespace]` chunk-title prefix + namespace-tagged debug DataFrames
 - [x] Self-indexed `repo_devdocs_rag` (44 files, 264 chunks); 2 cross-NS sanity probes
 
-**Phase 5 — eval gate + fine-tune**
-- [ ] 50-item hand-written golden set across both namespaces
-- [ ] Ragas regression in CI
-- [ ] Fine-tune `bge-small-en-v1.5` (contrastive); publish recall@10 vs base
-- [ ] Add 3 remaining namespaces: `repo_auto_sentinel`, `repo_devcontext_mcp`, `repo_csye6225`
+**Phase 5 — eval gate + fine-tune** *(in progress)*
+- [x] Add 2 remaining namespaces: `repo_auto_sentinel` (415 chunks), `repo_devcontext_mcp` (93 chunks); 3 new sanity probes pass
+- [ ] `/admin/reload` endpoint (BM25 hot-reload after re-index, no restart needed)
+- [ ] 50-item hand-written golden set across all 4 namespaces
+- [ ] Deterministic retrieval eval (recall@k, mrr@k) + informational CI gate
+- [ ] Fine-tune `bge-small-en-v1.5` (contrastive); publish recall@10 same-size comparison
 
 **Phase 6 — production LLM + reranker** *(deferred)*
 - [ ] Anthropic streaming client behind the existing `LLMClient` Protocol
