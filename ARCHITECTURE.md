@@ -444,6 +444,28 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   2,905 chunks. 3 new sanity probes added (auto_sentinel_parse_log_node,
   devcontext_mcp_search_codebase_tool, cross_ns_all_four_code_routing).
 
+### D26 — `/admin/reload` for BM25 hot-reload (Phase 5 M1.5)
+
+- **Alternatives**: restart the uvicorn process; persist BM25 to disk and
+  detect checksum change on first query; a background polling loop.
+- **Why a POST endpoint**: after `python -m devdocs_rag.ingestion ...` adds
+  new chunks, the in-memory BM25 index is stale. A restart works but kills
+  all warm state (reranker weights stay in MPS RAM, not swapped back cheaply).
+  A `POST /admin/reload?namespace=<ns>` call rebuilds only the affected
+  namespace's BM25 from a Qdrant scroll (~1s), while other namespaces keep
+  serving queries uninterrupted.
+- **Implementation**: `invalidate_namespace(ns)` in `_bm25_registry.py`
+  — evict under a short lock, scroll outside the lock, store under a second
+  short lock. A concurrent search that hits the eviction window triggers its
+  own rebuild (both scroll the same Qdrant data → deterministic result).
+- **No Redis flush**: the embedding cache is content-addressable
+  (`model_tag + content_sha256`), so re-indexed chunks with the same text
+  hit the cache correctly without invalidation. No result cache exists.
+- **Mock-mode**: returns `{reloaded: [], bm25_chunks: {}}` — no Qdrant
+  expected in test environments.
+- **Revisit**: add auth (e.g. a shared secret header) if this server ever
+  becomes multi-tenant or faces a public network.
+
 ---
 
 ## 7. Open questions

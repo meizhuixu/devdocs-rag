@@ -112,7 +112,7 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 
 **Phase 5 — eval gate + fine-tune** *(in progress)*
 - [x] Add 2 remaining namespaces: `repo_auto_sentinel` (415 chunks), `repo_devcontext_mcp` (93 chunks); 3 new sanity probes pass
-- [ ] `/admin/reload` endpoint (BM25 hot-reload after re-index, no restart needed)
+- [x] `/admin/reload` endpoint (BM25 hot-reload after re-index, no restart needed)
 - [ ] 50-item hand-written golden set across all 4 namespaces
 - [ ] Deterministic retrieval eval (recall@k, mrr@k) + informational CI gate
 - [ ] Fine-tune `bge-small-en-v1.5` (contrastive); publish recall@10 same-size comparison

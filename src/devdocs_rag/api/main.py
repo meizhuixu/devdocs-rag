@@ -24,14 +24,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from devdocs_rag.config import configure_logging, get_settings
 from devdocs_rag.generation.llm_client import LLMMessage, MockLLMClient, get_llm_client
 from devdocs_rag.generation.prompts import build_rag_messages
-from devdocs_rag.retrieval._bm25_registry import prime_namespaces
+from devdocs_rag.retrieval._bm25_registry import invalidate_namespace, prime_namespaces
 from devdocs_rag.retrieval.hybrid import RetrievalDebug, RetrievedChunk, search_with_debug
 from devdocs_rag.retrieval.reranker import get_reranker
 
@@ -53,6 +53,13 @@ class HealthResponse(BaseModel):
     mock_embeddings: bool
     reranker_type: str
     expose_retrieval_debug: bool
+
+
+class ReloadResponse(BaseModel):
+    """Response from POST /admin/reload."""
+
+    reloaded: list[str]
+    bm25_chunks: dict[str, int]
 
 
 def _chunk_summary(chunk: RetrievedChunk, snippet_len: int = 300) -> dict[str, Any]:
@@ -132,6 +139,28 @@ def create_app() -> FastAPI:
             expose_retrieval_debug=settings.expose_retrieval_debug,
         )
 
+    @app.post("/admin/reload", response_model=ReloadResponse)
+    async def admin_reload(
+        namespace: str | None = Query(
+            default=None, description="Namespace to reload. Omit to reload all default namespaces."
+        ),
+    ) -> ReloadResponse:
+        """Rebuild BM25 index(es) after re-ingestion without restarting the server.
+
+        Mock-mode (USE_MOCK_EMBEDDINGS=true) is a no-op: returns empty lists
+        because Qdrant isn't expected to be reachable in test environments.
+        """
+        if settings.use_mock_embeddings:
+            logger.info("/admin/reload: mock mode — skipping rebuild")
+            return ReloadResponse(reloaded=[], bm25_chunks={})
+
+        targets = [namespace] if namespace is not None else list(settings.default_namespaces)
+        logger.info("/admin/reload: targets=%s", targets)
+        bm25_chunks: dict[str, int] = {}
+        for ns in targets:
+            bm25_chunks[ns] = invalidate_namespace(ns)
+        return ReloadResponse(reloaded=targets, bm25_chunks=bm25_chunks)
+
     @app.post("/query/stream")
     async def query_stream(req: QueryRequest) -> EventSourceResponse:
         ns = req.namespaces or settings.default_namespaces
@@ -201,6 +230,7 @@ __all__ = [
     "LLMMessage",
     "MockLLMClient",
     "QueryRequest",
+    "ReloadResponse",
     "app",
     "create_app",
 ]
