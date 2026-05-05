@@ -206,9 +206,15 @@ Every entry: **decision · alternatives considered · why this · when revisit**
 - **Why bge-base** (updated 2026-04-28, was bge-large): open weights, strong
   on technical English, license-clean for self-host. **MTEB delta vs bge-large
   is ~0.7**; the 3× model-size win matters on M3 Air with 16 GB (thermal +
-  RAM headroom for Qdrant + IDE). Phase 5 fine-tunes `bge-small` and shows
-  the comparison.
-- **Revisit**: when a clear successor ships with measurable recall gains.
+  RAM headroom for Qdrant + IDE). Phase 5 fine-tunes `bge-small` (D23) and
+  publishes a same-size recall@10 comparison.
+- **Phase 5 fine-tune outcome**: if fine-tuned bge-small recall@10 approaches
+  bge-base, a future decision point is whether to re-index the corpus with the
+  fine-tuned model (requires new Qdrant collections for 384d vectors, ~5 min
+  re-ingestion). Tracked in D23.
+- **Revisit**: when a clear successor ships with measurable recall gains, or
+  after D23 comparison establishes whether fine-tuned bge-small warrants
+  replacing bge-base in production.
 
 ### D7 — Phase 1 ships a mock LLM behind a Protocol
 
@@ -465,6 +471,64 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   expected in test environments.
 - **Revisit**: add auth (e.g. a shared secret header) if this server ever
   becomes multi-tenant or faces a public network.
+
+### D23 — Fine-tune target: bge-small-en-v1.5 (384-d), prod stays bge-base (Phase 5 M4)
+
+- **Alternatives**: fine-tune bge-base (prod model, same-dimension, no re-indexing
+  needed); fine-tune bge-large (too large for M3 Air); use OpenAI embeddings.
+- **Why bge-small**: training bge-base (768d, ~110M params) on M3 Air MPS takes
+  ~30–60 min per epoch and risks memory pressure alongside Qdrant + IDE. bge-small
+  (384d, ~33M params) trains in minutes, making the fine-tune–eval cycle fast
+  enough to iterate on. The same-size comparison (bge-small base vs fine-tuned)
+  cleanly attributes any recall gain to domain adaptation, not model capacity.
+- **Why prod stays bge-base**: switching production requires re-indexing all 2 905
+  chunks with 384d vectors into new Qdrant collections. The current 768d collections
+  remain valid; no downtime needed. If the fine-tuned bge-small shows >5 pp recall
+  lift over bge-base at recall@10, that trade-off is re-evaluated.
+- **Comparison methodology**: dense-only cosine similarity (no BM25, no reranker)
+  computed in-memory against Qdrant-scrolled corpus texts. All three models
+  (bge-base, bge-small base, bge-small fine-tuned) share the same evaluation
+  harness regardless of vector dimension. See `eval/finetune/eval_comparison.py`.
+- **Revisit**: after Phase 5 comparison table is populated. If fine-tuned model
+  clearly wins, schedule a re-index PR.
+
+### D24 — Hard negative mining from hybrid search top-20 (Phase 5 M4)
+
+- **Alternatives**: random negatives (easy, low signal); BM25-only negatives;
+  manual annotation; augmentation from external corpora.
+- **Why hybrid top-20**: non-relevant chunks in the top-20 are semantically close
+  to the query (the retriever "almost" retrieved them) — exactly the challenging
+  signal that `MultipleNegativesRankingLoss` needs to push apart from true
+  positives. Random negatives are trivially separated and produce weak gradients.
+- **Triple count**: 50 items × avg 1.5 positives × 3 hard negatives ≈ 225 triples.
+  Small dataset for fine-tuning, but MNR loss uses in-batch negatives (batch=16 →
+  15 negatives per anchor per step), so effective negative count is
+  225 × 15 ≈ 3 375 across training. Sufficient for domain adaptation signal.
+- **Positive source**: fetched directly from Qdrant by `(namespace, file_path, symbol)`
+  rather than relying on retrieval rank, so missing-from-top-20 positives are still
+  included in training.
+- **Revisit**: if fine-tuned recall is weak, mine harder negatives by moving the pool
+  to top-50 or adding BM25-exclusive negatives (chunks BM25 retrieves that dense misses).
+
+### D25 — MultipleNegativesRankingLoss, batch=16, epochs=5 (Phase 5 M4)
+
+- **Alternatives**: TripletLoss (harder to tune margin); CosineSimilarityLoss
+  (requires explicit positive/negative labels per pair); ContrastiveLoss.
+- **Why MNR**: with explicit hard negatives in the dataset, MNR treats every
+  other (anchor, positive) pair in the batch as an additional in-batch negative,
+  maximising the use of a small dataset. Batch=16 gives 15 in-batch negatives
+  plus 1 explicit hard negative per anchor = 16 effective negatives per step.
+- **Epochs 5**: with ~225 triples and batch=16, one epoch is ~14 steps. 5 epochs
+  = ~70 steps total. Short training is appropriate for domain adaptation (not
+  pre-training from scratch); longer runs risk overfitting to the 50-item set.
+- **Warmup 10%**: standard; prevents early large-gradient instability when
+  starting from a pre-trained checkpoint.
+- **Precision**: bf16 on CUDA (fast, numerically stable for this task). MPS
+  uses fp32 — `sentence_transformers.training_args.SentenceTransformerTrainingArguments`
+  `bf16=True` is CUDA-only; MPS silently falls back to fp32, which is correct.
+- **Revisit**: if fine-tuned recall@10 doesn't improve, try increasing epochs to
+  10 or lowering LR to 1e-5; if the model overfits (train loss < 0.1, recall
+  stagnates), reduce epochs to 3.
 
 ### D27 — Deterministic retrieval eval: recall@k, mrr@k, precision@k (Phase 5 M3)
 
