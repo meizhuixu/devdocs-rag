@@ -62,18 +62,23 @@ Flags:
 | `--base-model` | `BAAI/bge-small-en-v1.5` | Starting checkpoint |
 | `--epochs` | 5 | Training epochs |
 | `--batch` | 16 | Per-device batch size |
+| `--device` | auto (cuda→cpu) | Force device; use `--device mps` only if ≥ 4 GB free |
 
 #### Hyperparameters
 
 | Param | Value | Rationale |
 |---|---|---|
-| Base model | `BAAI/bge-small-en-v1.5` | 384d, 33M params — trains in minutes on M3 Air |
+| Base model | `BAAI/bge-small-en-v1.5` | 384d, 33M params — trains in ~20 min on CPU (M3 Air) |
 | Loss | `MultipleNegativesRankingLoss` | In-batch negatives + explicit hard negatives |
-| Epochs | 5 | ~225 triples / 16 batch → ~70 steps/epoch → 350 total |
-| Batch size | 16 | Fits 16 GB unified memory; more in-batch negatives = stronger signal |
+| Epochs | 5 | 258 triples / 16 batch → 16 steps/epoch → 85 total |
+| Batch size | 16 | More in-batch negatives = stronger signal |
 | LR | 2e-5 | Standard for sentence-transformer fine-tuning |
 | Warmup | 10% of total steps | Prevents early instability |
-| Precision | bf16 (CUDA) / fp32 (MPS/CPU) | MPS bf16 training support is unreliable |
+| Precision | bf16 (CUDA) / fp32 (CPU/MPS) | MPS bf16 training support is unreliable |
+
+> **Note on MPS OOM**: training on an M3 Air (20 GB unified memory) defaults to CPU because
+> near-full memory allocation causes MPS training to crash after step 1. CPU training takes
+> ~20 minutes for 85 steps and is perfectly reproducible.
 
 ### 3. Evaluate
 
@@ -89,19 +94,24 @@ the comparison isolates the embedding quality.
 
 ## Results
 
-> Run `eval_comparison.py` to fill in the table. Results are intentionally not
-> committed as they depend on local training and will be added after the run.
+Measured on 2026-05-05. Corpus: 2 919 chunks across 4 namespaces. 50 golden
+queries. In-memory cosine similarity (no BM25, no reranker).
 
 | Model | Dim | recall@10 (dense-only) |
 |---|---|---|
-| bge-base-en-v1.5 (prod) | 768 | TBD |
-| bge-small-en-v1.5 (base) | 384 | TBD |
-| bge-small-en-v1.5 (fine-tuned) | 384 | TBD |
+| bge-base-en-v1.5 (prod) | 768 | 0.7900 |
+| bge-small-en-v1.5 (base) | 384 | 0.7800 |
+| bge-small-en-v1.5 (fine-tuned) | 384 | 1.0000 |
 
-**Interpretation**: the recall delta between bge-small base and fine-tuned shows
-the value of domain adaptation. If fine-tuned bge-small approaches bge-base
-recall while being 4× smaller, it's a strong signal to consider re-indexing with
-the fine-tuned model.
+**Interpretation**: the fine-tuned model reaches perfect recall@10 on this
+evaluation — but this is **in-sample**: the triples were mined from the same 50
+golden queries, so the model has effectively memorised the query→chunk pairings.
+The meaningful signal is the base vs prod comparison: bge-small (384d) closes to
+within 1% of bge-base (768d) out-of-the-box, confirming the D6 decision to use
+bge-base in prod was conservative rather than necessary.
+
+For a fairer fine-tune evaluation, hold out 10 golden items from mining and
+evaluate only on those — that is a separate, future experiment.
 
 ---
 
