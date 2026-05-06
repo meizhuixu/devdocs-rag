@@ -180,6 +180,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Validate dataset structure only — no retrieval calls.",
     )
+    parser.add_argument(
+        "--min-recall",
+        type=float,
+        default=None,
+        metavar="THRESHOLD",
+        help=(
+            "Fail (exit 1) if recall@10 on evaluated items is below THRESHOLD. "
+            "Skipped items (Qdrant unavailable) do not count as failures."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.validate_only:
@@ -195,6 +205,12 @@ def main(argv: list[str] | None = None) -> int:
             f"recall@5={a.recall_at_5:.3f}  recall@10={a.recall_at_10:.3f}"
             f"  mrr@10={a.mrr_at_10:.3f}  precision@5={a.precision_at_5:.3f}"
         )
+        if args.min_recall is not None and a.recall_at_10 < args.min_recall:
+            print(
+                f"FAIL: recall@10={a.recall_at_10:.4f} < threshold={args.min_recall}",
+                file=sys.stderr,
+            )
+            return 1
     if report.error:
         print(f"error: {report.error}", file=sys.stderr)
     return 0

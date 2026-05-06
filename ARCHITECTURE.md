@@ -208,13 +208,14 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   is ~0.7**; the 3× model-size win matters on M3 Air with 16 GB (thermal +
   RAM headroom for Qdrant + IDE). Phase 5 fine-tunes `bge-small` (D23) and
   publishes a same-size recall@10 comparison.
-- **Phase 5 fine-tune outcome**: if fine-tuned bge-small recall@10 approaches
-  bge-base, a future decision point is whether to re-index the corpus with the
-  fine-tuned model (requires new Qdrant collections for 384d vectors, ~5 min
-  re-ingestion). Tracked in D23.
-- **Revisit**: when a clear successor ships with measurable recall gains, or
-  after D23 comparison establishes whether fine-tuned bge-small warrants
-  replacing bge-base in production.
+- **Phase 5 fine-tune outcome** (2026-05-05, dense-only recall@10, 2,919 chunks,
+  50 golden queries): bge-base 0.7900 · bge-small-base 0.7800 · bge-small
+  fine-tuned 1.0000 (in-sample — see D23). Gap between bge-small-base and
+  bge-base is only 1 pp; fine-tuned model does not surpass bge-base by the >5 pp
+  threshold in D23. **Production embedder stays bge-base-en-v1.5.**
+- **Revisit**: when a clear successor ships with measurable recall gains, or if
+  a fair (held-out) fine-tune comparison shows fine-tuned bge-small exceeding
+  bge-base by >5 pp recall@10.
 
 ### D7 — Phase 1 ships a mock LLM behind a Protocol
 
@@ -478,10 +479,10 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   needed); fine-tune bge-large (too large for M3 Air); use OpenAI embeddings.
 - **Why bge-small**: training bge-base (768d, ~110M params) on M3 Air MPS takes
   ~30–60 min per epoch and risks memory pressure alongside Qdrant + IDE. bge-small
-  (384d, ~33M params) trains in minutes, making the fine-tune–eval cycle fast
+  (384d, ~33M params) trains in ~20 min on CPU, making the fine-tune–eval cycle fast
   enough to iterate on. The same-size comparison (bge-small base vs fine-tuned)
   cleanly attributes any recall gain to domain adaptation, not model capacity.
-- **Why prod stays bge-base**: switching production requires re-indexing all 2 905
+- **Why prod stays bge-base**: switching production requires re-indexing all 2 919
   chunks with 384d vectors into new Qdrant collections. The current 768d collections
   remain valid; no downtime needed. If the fine-tuned bge-small shows >5 pp recall
   lift over bge-base at recall@10, that trade-off is re-evaluated.
@@ -489,8 +490,18 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   computed in-memory against Qdrant-scrolled corpus texts. All three models
   (bge-base, bge-small base, bge-small fine-tuned) share the same evaluation
   harness regardless of vector dimension. See `eval/finetune/eval_comparison.py`.
-- **Revisit**: after Phase 5 comparison table is populated. If fine-tuned model
-  clearly wins, schedule a re-index PR.
+- **Phase 5 results** (2026-05-05, commit fc58cac): bge-base 0.7900 · bge-small-base
+  0.7800 · bge-small-fine-tuned 1.0000 (in-sample — triples mined from same 50
+  golden queries; real-world estimate ≈ 0.78). Fine-tuned model does NOT exceed
+  bge-base by >5 pp. **Decision: prod stays bge-base. No re-index planned.**
+- **MPS OOM note**: M3 Air (20 GB unified memory) is nearly exhausted at rest;
+  `SentenceTransformerTrainingArguments.device` auto-selects MPS and OOMs at step 2.
+  Fix (commit fc58cac): monkeypatch `torch.backends.mps.is_available → False` before
+  trainer construction when `--device cpu` is specified; restore after training.
+  Default on non-CUDA is now CPU. MPS requires explicit `--device mps`.
+- **Revisit**: if a fair held-out comparison (e.g., 40/10 train/test split of the
+  golden set) shows fine-tuned bge-small exceeding bge-base by >5 pp recall@10,
+  schedule a re-index PR.
 
 ### D24 — Hard negative mining from hybrid search top-20 (Phase 5 M4)
 
@@ -518,17 +529,17 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   other (anchor, positive) pair in the batch as an additional in-batch negative,
   maximising the use of a small dataset. Batch=16 gives 15 in-batch negatives
   plus 1 explicit hard negative per anchor = 16 effective negatives per step.
-- **Epochs 5**: with ~225 triples and batch=16, one epoch is ~14 steps. 5 epochs
-  = ~70 steps total. Short training is appropriate for domain adaptation (not
+- **Epochs 5**: with 258 triples and batch=16, one epoch is 16 steps. 5 epochs
+  = 85 steps total. Short training is appropriate for domain adaptation (not
   pre-training from scratch); longer runs risk overfitting to the 50-item set.
 - **Warmup 10%**: standard; prevents early large-gradient instability when
   starting from a pre-trained checkpoint.
-- **Precision**: bf16 on CUDA (fast, numerically stable for this task). MPS
-  uses fp32 — `sentence_transformers.training_args.SentenceTransformerTrainingArguments`
-  `bf16=True` is CUDA-only; MPS silently falls back to fp32, which is correct.
-- **Revisit**: if fine-tuned recall@10 doesn't improve, try increasing epochs to
-  10 or lowering LR to 1e-5; if the model overfits (train loss < 0.1, recall
-  stagnates), reduce epochs to 3.
+- **Precision**: bf16 on CUDA (fast, numerically stable for this task). CPU/MPS
+  use fp32. Default device is CPU on non-CUDA (see MPS OOM note in D23).
+- **Actual run** (2026-05-05, CPU, M3 Air): 85 steps in ~20 min,
+  `train_loss=0.640`, sanity embed norm=1.0000. See commit fc58cac.
+- **Revisit**: not needed — in-sample recall is saturated at 1.0. A fair
+  out-of-sample comparison would require a held-out split of the golden set.
 
 ### D27 — Deterministic retrieval eval: recall@k, mrr@k, precision@k (Phase 5 M3)
 

@@ -4,7 +4,7 @@
 > repos. Built as a personal knowledge base — dogfooded daily.
 
 [![CI](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml)
-![status: phase 4 — complete](https://img.shields.io/badge/status-phase%204%20complete-brightgreen)
+![status: phase 5 — complete](https://img.shields.io/badge/status-phase%205%20complete-brightgreen)
 ![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 
 ---
@@ -110,12 +110,12 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 - [x] Streamlit `[namespace]` chunk-title prefix + namespace-tagged debug DataFrames
 - [x] Self-indexed `repo_devdocs_rag` (44 files, 264 chunks); 2 cross-NS sanity probes
 
-**Phase 5 — eval gate + fine-tune** *(in progress)*
+**Phase 5 — eval gate + fine-tune** ✅
 - [x] Add 2 remaining namespaces: `repo_auto_sentinel` (415 chunks), `repo_devcontext_mcp` (93 chunks); 3 new sanity probes pass
 - [x] `/admin/reload` endpoint (BM25 hot-reload after re-index, no restart needed)
 - [x] 50-item hand-written golden set across all 4 namespaces (`eval/datasets/golden_qa.jsonl`)
-- [x] Deterministic retrieval eval (recall@k, mrr@k, precision@k) + informational CI gate (`eval/metrics.py` + `eval/ragas_runner.py`)
-- [x] Fine-tune `bge-small-en-v1.5` (contrastive); same-size recall@10 comparison scripts ready (run to populate table)
+- [x] Deterministic retrieval eval (recall@k, mrr@k, precision@k) + CI gate at recall@10 ≥ 0.70 (`eval/metrics.py` + `eval/ragas_runner.py`)
+- [x] Fine-tuned `bge-small-en-v1.5` on 258 hard-negative triples; 3-way dense recall@10 comparison: prod 0.79 · base-small 0.78 · fine-tuned 1.00 (in-sample)
 
 **Phase 6 — production LLM + reranker** *(deferred)*
 - [ ] Anthropic streaming client behind the existing `LLMClient` Protocol
@@ -153,16 +153,21 @@ Reproducible via `python scripts/probe_retrieval.py` after running ingestion.
 
 Dense-only recall@10 (in-memory cosine similarity, no BM25 / reranker) to isolate
 the embedding model's contribution. `bge-base` is included as a 768d reference.
+Corpus: 2,919 chunks across 4 namespaces. 50 golden queries. Measured 2026-05-05.
 
 | Model | Dim | recall@10 |
 |---|---|---|
-| bge-base-en-v1.5 (prod) | 768 | TBD |
-| bge-small-en-v1.5 base | 384 | TBD |
-| bge-small-en-v1.5 fine-tuned | 384 | TBD |
+| bge-base-en-v1.5 (prod) | 768 | 0.7900 |
+| bge-small-en-v1.5 base | 384 | 0.7800 |
+| bge-small-en-v1.5 fine-tuned\* | 384 | 1.0000 |
 
-> Run `USE_MOCK_EMBEDDINGS=false python eval/finetune/eval_comparison.py` after
-> completing `mine_triples.py` + `train.py` to populate this table.
-> See `eval/finetune/README.md` for the step-by-step.
+\* **In-sample**: triples were mined from the same 50 golden queries, so the
+fine-tuned model memorises the query→chunk pairings. Real-world estimate ≈ 0.78
+(bge-small base). The meaningful result is the base vs prod gap: bge-small (384d)
+reaches within 1% of bge-base (768d) out-of-the-box, confirming that the D6
+decision to use bge-base in prod is conservative rather than necessary.
+
+See `eval/finetune/README.md` for the full methodology and step-by-step.
 
 ![Streamlit demo](docs/screenshots/streamlit_demo_overview.png)
 *Streamlit UI: chunk retrieval, mock LLM file distribution, and debug breakdown (BM25 / Dense / RRF / Reranked).*

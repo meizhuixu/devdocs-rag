@@ -103,15 +103,22 @@ queries. In-memory cosine similarity (no BM25, no reranker).
 | bge-small-en-v1.5 (base) | 384 | 0.7800 |
 | bge-small-en-v1.5 (fine-tuned) | 384 | 1.0000 |
 
-**Interpretation**: the fine-tuned model reaches perfect recall@10 on this
-evaluation — but this is **in-sample**: the triples were mined from the same 50
-golden queries, so the model has effectively memorised the query→chunk pairings.
-The meaningful signal is the base vs prod comparison: bge-small (384d) closes to
-within 1% of bge-base (768d) out-of-the-box, confirming the D6 decision to use
-bge-base in prod was conservative rather than necessary.
+**Interpretation**:
 
-For a fairer fine-tune evaluation, hold out 10 golden items from mining and
-evaluate only on those — that is a separate, future experiment.
+- **Fine-tuned 1.0000 is in-sample**: triples were mined from the same 50 golden
+  queries used for evaluation, so the model has effectively memorised the
+  query→chunk pairings. **Real-world estimate for fine-tuned bge-small ≈ 0.78**
+  (same as the base model, since no held-out set was used).
+
+- **The meaningful comparison is base vs prod**: bge-small (384d, 0.78) closes to
+  within 1% of bge-base (768d, 0.79) out-of-the-box, with 4× fewer parameters.
+  This confirms the D6 decision to use bge-base in prod is conservative — the
+  smaller model is already nearly as good.
+
+- **Decision point**: fine-tuned bge-small does not surpass bge-base by the >5 pp
+  threshold set in D23. Production embedder stays bge-base. A fairer fine-tune
+  comparison would hold out 10 golden items from mining and evaluate only on those;
+  that is a separate, future experiment.
 
 ---
 
