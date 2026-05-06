@@ -65,7 +65,12 @@ class Settings(BaseSettings):
     # search scope when QueryRequest.namespaces is empty. Order matters only
     # for startup logging — search treats them as a set.
     default_namespaces: list[str] = Field(
-        default_factory=lambda: ["pytorch_docs", "repo_devdocs_rag"]
+        default_factory=lambda: [
+            "pytorch_docs",
+            "repo_devdocs_rag",
+            "repo_auto_sentinel",
+            "repo_devcontext_mcp",
+        ]
     )
 
     # When true, /query/stream emits the BM25 / dense / RRF / reranked debug
@@ -104,6 +109,31 @@ class Settings(BaseSettings):
                 "docs/screenshots/**",
                 "uv.lock",
                 ".claude/settings.local.json",
+            ],
+            # output/** = generated diagnostic reports (markdown, but not source docs)
+            # data/** = JSON crash-event fixtures (not .py/.md, filtered by loader anyway)
+            # .specify/** = spec-tracking tool config, not source
+            "repo_auto_sentinel": [
+                ".git/**",
+                "**/__pycache__/**",
+                "*.egg-info/**",
+                ".pytest_cache/**",
+                ".specify/**",
+                ".claude/**",
+                "output/**",
+                "data/**",
+            ],
+            "repo_devcontext_mcp": [
+                ".git/**",
+                ".venv/**",
+                "**/__pycache__/**",
+                ".mypy_cache/**",
+                ".ruff_cache/**",
+                ".pytest_cache/**",
+                ".github/**",
+                "docs/screenshots/**",
+                "uv.lock",
+                ".claude/**",
             ],
         }
     )

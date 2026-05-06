@@ -206,9 +206,16 @@ Every entry: **decision · alternatives considered · why this · when revisit**
 - **Why bge-base** (updated 2026-04-28, was bge-large): open weights, strong
   on technical English, license-clean for self-host. **MTEB delta vs bge-large
   is ~0.7**; the 3× model-size win matters on M3 Air with 16 GB (thermal +
-  RAM headroom for Qdrant + IDE). Phase 5 fine-tunes `bge-small` and shows
-  the comparison.
-- **Revisit**: when a clear successor ships with measurable recall gains.
+  RAM headroom for Qdrant + IDE). Phase 5 fine-tunes `bge-small` (D23) and
+  publishes a same-size recall@10 comparison.
+- **Phase 5 fine-tune outcome** (2026-05-05, dense-only recall@10, 2,919 chunks,
+  50 golden queries): bge-base 0.7900 · bge-small-base 0.7800 · bge-small
+  fine-tuned 1.0000 (in-sample — see D23). Gap between bge-small-base and
+  bge-base is only 1 pp; fine-tuned model does not surpass bge-base by the >5 pp
+  threshold in D23. **Production embedder stays bge-base-en-v1.5.**
+- **Revisit**: when a clear successor ships with measurable recall gains, or if
+  a fair (held-out) fine-tune comparison shows fine-tuned bge-small exceeding
+  bge-base by >5 pp recall@10.
 
 ### D7 — Phase 1 ships a mock LLM behind a Protocol
 
@@ -438,6 +445,126 @@ Every entry: **decision · alternatives considered · why this · when revisit**
   verify queries route correctly across both namespaces (devdocs-rag
   internal symbol → repo_devdocs_rag; CUDA stream sync → pytorch_docs
   even with both NS in scope).
+- **Phase 5 M1 additions**: `repo_auto_sentinel` (52 files → 415 chunks,
+  53 files filtered) and `repo_devcontext_mcp` (21 files → 93 chunks,
+  1711 files filtered — mostly `.venv`). Total corpus: 4 namespaces,
+  2,905 chunks. 3 new sanity probes added (auto_sentinel_parse_log_node,
+  devcontext_mcp_search_codebase_tool, cross_ns_all_four_code_routing).
+
+### D26 — `/admin/reload` for BM25 hot-reload (Phase 5 M1.5)
+
+- **Alternatives**: restart the uvicorn process; persist BM25 to disk and
+  detect checksum change on first query; a background polling loop.
+- **Why a POST endpoint**: after `python -m devdocs_rag.ingestion ...` adds
+  new chunks, the in-memory BM25 index is stale. A restart works but kills
+  all warm state (reranker weights stay in MPS RAM, not swapped back cheaply).
+  A `POST /admin/reload?namespace=<ns>` call rebuilds only the affected
+  namespace's BM25 from a Qdrant scroll (~1s), while other namespaces keep
+  serving queries uninterrupted.
+- **Implementation**: `invalidate_namespace(ns)` in `_bm25_registry.py`
+  — evict under a short lock, scroll outside the lock, store under a second
+  short lock. A concurrent search that hits the eviction window triggers its
+  own rebuild (both scroll the same Qdrant data → deterministic result).
+- **No Redis flush**: the embedding cache is content-addressable
+  (`model_tag + content_sha256`), so re-indexed chunks with the same text
+  hit the cache correctly without invalidation. No result cache exists.
+- **Mock-mode**: returns `{reloaded: [], bm25_chunks: {}}` — no Qdrant
+  expected in test environments.
+- **Revisit**: add auth (e.g. a shared secret header) if this server ever
+  becomes multi-tenant or faces a public network.
+
+### D23 — Fine-tune target: bge-small-en-v1.5 (384-d), prod stays bge-base (Phase 5 M4)
+
+- **Alternatives**: fine-tune bge-base (prod model, same-dimension, no re-indexing
+  needed); fine-tune bge-large (too large for M3 Air); use OpenAI embeddings.
+- **Why bge-small**: training bge-base (768d, ~110M params) on M3 Air MPS takes
+  ~30–60 min per epoch and risks memory pressure alongside Qdrant + IDE. bge-small
+  (384d, ~33M params) trains in ~20 min on CPU, making the fine-tune–eval cycle fast
+  enough to iterate on. The same-size comparison (bge-small base vs fine-tuned)
+  cleanly attributes any recall gain to domain adaptation, not model capacity.
+- **Why prod stays bge-base**: switching production requires re-indexing all 2 919
+  chunks with 384d vectors into new Qdrant collections. The current 768d collections
+  remain valid; no downtime needed. If the fine-tuned bge-small shows >5 pp recall
+  lift over bge-base at recall@10, that trade-off is re-evaluated.
+- **Comparison methodology**: dense-only cosine similarity (no BM25, no reranker)
+  computed in-memory against Qdrant-scrolled corpus texts. All three models
+  (bge-base, bge-small base, bge-small fine-tuned) share the same evaluation
+  harness regardless of vector dimension. See `eval/finetune/eval_comparison.py`.
+- **Phase 5 results** (2026-05-05, commit fc58cac): bge-base 0.7900 · bge-small-base
+  0.7800 · bge-small-fine-tuned 1.0000 (in-sample — triples mined from same 50
+  golden queries; real-world estimate ≈ 0.78). Fine-tuned model does NOT exceed
+  bge-base by >5 pp. **Decision: prod stays bge-base. No re-index planned.**
+- **MPS OOM note**: M3 Air (20 GB unified memory) is nearly exhausted at rest;
+  `SentenceTransformerTrainingArguments.device` auto-selects MPS and OOMs at step 2.
+  Fix (commit fc58cac): monkeypatch `torch.backends.mps.is_available → False` before
+  trainer construction when `--device cpu` is specified; restore after training.
+  Default on non-CUDA is now CPU. MPS requires explicit `--device mps`.
+- **Revisit**: if a fair held-out comparison (e.g., 40/10 train/test split of the
+  golden set) shows fine-tuned bge-small exceeding bge-base by >5 pp recall@10,
+  schedule a re-index PR.
+
+### D24 — Hard negative mining from hybrid search top-20 (Phase 5 M4)
+
+- **Alternatives**: random negatives (easy, low signal); BM25-only negatives;
+  manual annotation; augmentation from external corpora.
+- **Why hybrid top-20**: non-relevant chunks in the top-20 are semantically close
+  to the query (the retriever "almost" retrieved them) — exactly the challenging
+  signal that `MultipleNegativesRankingLoss` needs to push apart from true
+  positives. Random negatives are trivially separated and produce weak gradients.
+- **Triple count**: 50 items × avg 1.5 positives × 3 hard negatives ≈ 225 triples.
+  Small dataset for fine-tuning, but MNR loss uses in-batch negatives (batch=16 →
+  15 negatives per anchor per step), so effective negative count is
+  225 × 15 ≈ 3 375 across training. Sufficient for domain adaptation signal.
+- **Positive source**: fetched directly from Qdrant by `(namespace, file_path, symbol)`
+  rather than relying on retrieval rank, so missing-from-top-20 positives are still
+  included in training.
+- **Revisit**: if fine-tuned recall is weak, mine harder negatives by moving the pool
+  to top-50 or adding BM25-exclusive negatives (chunks BM25 retrieves that dense misses).
+
+### D25 — MultipleNegativesRankingLoss, batch=16, epochs=5 (Phase 5 M4)
+
+- **Alternatives**: TripletLoss (harder to tune margin); CosineSimilarityLoss
+  (requires explicit positive/negative labels per pair); ContrastiveLoss.
+- **Why MNR**: with explicit hard negatives in the dataset, MNR treats every
+  other (anchor, positive) pair in the batch as an additional in-batch negative,
+  maximising the use of a small dataset. Batch=16 gives 15 in-batch negatives
+  plus 1 explicit hard negative per anchor = 16 effective negatives per step.
+- **Epochs 5**: with 258 triples and batch=16, one epoch is 16 steps. 5 epochs
+  = 85 steps total. Short training is appropriate for domain adaptation (not
+  pre-training from scratch); longer runs risk overfitting to the 50-item set.
+- **Warmup 10%**: standard; prevents early large-gradient instability when
+  starting from a pre-trained checkpoint.
+- **Precision**: bf16 on CUDA (fast, numerically stable for this task). CPU/MPS
+  use fp32. Default device is CPU on non-CUDA (see MPS OOM note in D23).
+- **Actual run** (2026-05-05, CPU, M3 Air): 85 steps in ~20 min,
+  `train_loss=0.640`, sanity embed norm=1.0000. See commit fc58cac.
+- **Revisit**: not needed — in-sample recall is saturated at 1.0. A fair
+  out-of-sample comparison would require a held-out split of the golden set.
+
+### D27 — Deterministic retrieval eval: recall@k, mrr@k, precision@k (Phase 5 M3)
+
+- **Alternatives**: Ragas full pipeline (LLM-as-judge for faithfulness/relevance),
+  manual inspection only.
+- **Why deterministic first**: the 50-item golden set has `relevant_chunks` ground
+  truth — no LLM call required. Deterministic metrics (recall, MRR, precision) are
+  free to run, reproducible in CI, and directly measure what the retriever does.
+  Ragas LLM-judge metrics (faithfulness, answer relevance) are deferred to Phase 6
+  when the real LLM lands.
+- **Match criterion**: `(namespace, path, symbol)` triple exact match. Code chunks
+  have deterministic symbols (function/class names via AST); doc chunks use the
+  heading symbol recorded at ingestion. A miss is a real retrieval failure, not
+  annotation noise.
+- **Metrics**: `recall@5`, `recall@10` (coverage), `mrr@10` (rank quality),
+  `precision@5` (precision). Implemented in `eval/metrics.py`.
+- **CI gate**: M3 is informational only — `continue-on-error: true` in `eval.yml`.
+  Gate hardens in Phase 6 once a recall@10 baseline is set against the live corpus.
+- **Graceful degradation**: if Qdrant is unavailable (CI without the service),
+  `ragas_runner.py` catches the connection error per query and marks it as skipped;
+  the step exits 0. A separate `--validate-only` mode validates JSONL structure
+  without any retrieval calls.
+- **Revisit**: when the real LLM ships (Phase 6), add Ragas faithfulness/relevance
+  on top of these deterministic metrics. If a learned ranker replaces RRF (D17),
+  re-run this eval to compare recall@10 on the golden set.
 
 ---
 

@@ -134,6 +134,27 @@ def test_ingestion_pipeline_missing_path(tmp_path: Path) -> None:
     assert report.files_seen == 0
 
 
+def test_admin_reload_mock_mode() -> None:
+    """Mock mode: /admin/reload is a no-op — returns 200 with empty lists.
+
+    Qdrant is not expected to be reachable in CI (USE_MOCK_EMBEDDINGS=true),
+    so the endpoint short-circuits rather than crashing.
+    """
+    app = create_app()
+    with TestClient(app) as client:
+        # No namespace param → reload all defaults (no-op in mock)
+        resp = client.post("/admin/reload")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["reloaded"] == []
+        assert body["bm25_chunks"] == {}
+
+        # Explicit namespace param → still no-op in mock
+        resp2 = client.post("/admin/reload?namespace=pytorch_docs")
+        assert resp2.status_code == 200
+        assert resp2.json()["reloaded"] == []
+
+
 def test_health_endpoint() -> None:
     app = create_app()
     with TestClient(app) as client:

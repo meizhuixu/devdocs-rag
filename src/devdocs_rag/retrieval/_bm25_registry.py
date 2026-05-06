@@ -5,7 +5,8 @@ calls `prime_namespaces()` so the cost is paid once at startup rather
 than on the first user query.
 
 Source-of-truth for the indexed corpus is Qdrant — we just rebuild from
-a scroll. After re-ingestion, restart the API to refresh the index.
+a scroll. After re-ingestion, call `POST /admin/reload` (which calls
+`invalidate_namespace()`) to refresh without restarting the server.
 """
 
 from __future__ import annotations
@@ -47,6 +48,23 @@ def prime_namespaces(namespaces: Iterable[str]) -> None:
     for ns in namespaces:
         logger.info("priming BM25 namespace=%s", ns)
         get_bm25_index(ns)
+
+
+def invalidate_namespace(namespace: str) -> int:
+    """Evict + rebuild the BM25 index for one namespace. Returns new chunk count.
+
+    Eviction is under a short lock so other namespaces keep serving queries
+    without delay. The Qdrant scroll (~1s) happens outside the lock; a
+    concurrent search that hits the eviction window triggers its own rebuild —
+    both scroll the same Qdrant data so the outcome is deterministic.
+    """
+    with _LOCK:
+        _INDEXES.pop(namespace, None)
+    new_index = _build(namespace)
+    with _LOCK:
+        _INDEXES[namespace] = new_index
+    logger.info("BM25 rebuilt: namespace=%s chunks=%d", namespace, new_index.size)
+    return new_index.size
 
 
 def clear() -> None:

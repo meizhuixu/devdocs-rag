@@ -300,12 +300,21 @@ devdocs-rag/
 │   └── ui/
 │       └── streamlit_app.py
 ├── tests/
-│   └── test_smoke.py
+│   ├── test_smoke.py
+│   └── test_eval_smoke.py           ← unit tests for eval/metrics.py
 ├── eval/
 │   ├── README.md
-│   ├── ragas_runner.py
-│   └── datasets/
-│       └── golden_qa.jsonl
+│   ├── metrics.py                   ← recall@k, mrr@k, precision@k (no LLM)
+│   ├── ragas_runner.py              ← golden-set runner → EvalReport
+│   ├── datasets/
+│   │   └── golden_qa.jsonl
+│   └── finetune/
+│       ├── README.md                ← setup + hyperparams + results table
+│       ├── mine_triples.py          ← golden set → triples.jsonl (hard negs)
+│       ├── train.py                 ← bge-small fine-tune (MNR loss)
+│       ├── eval_comparison.py       ← 3-way dense recall@10 comparison
+│       ├── triples.jsonl            (gitignored — generated)
+│       └── bge-small-finetuned/     (gitignored — ~120 MB model weights)
 └── data/
     └── README.md
 ```

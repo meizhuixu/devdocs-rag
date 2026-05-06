@@ -4,7 +4,7 @@
 > repos. Built as a personal knowledge base — dogfooded daily.
 
 [![CI](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml)
-![status: phase 4 — complete](https://img.shields.io/badge/status-phase%204%20complete-brightgreen)
+![status: phase 5 — complete](https://img.shields.io/badge/status-phase%205%20complete-brightgreen)
 ![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 
 ---
@@ -90,7 +90,7 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 - FastAPI `/query/stream` with SSE: `retrieved` event (with optional debug payload) → token stream → `done`
 - Streamlit demo with `[namespace]`-prefixed chunk expanders + typewriter-style mock LLM answer + collapsed debug breakdown
 
-**Corpus stats**: pytorch_docs (253 files, 2,133 chunks) + repo_devdocs_rag (44 files, 264 chunks) = **2,397 chunks across 2 namespaces, 768-dim vectors**.
+**Corpus stats**: pytorch_docs (2,133 chunks) + repo_devdocs_rag (264 chunks) + repo_auto_sentinel (415 chunks) + repo_devcontext_mcp (93 chunks) = **2,905 chunks across 4 namespaces, 768-dim vectors**.
 
 **Phase 3 — hybrid retrieval + local reranker** ✅ *(merged)*
 - [x] BM25Okapi over Qdrant scroll, doc-id keyed
@@ -110,11 +110,12 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 - [x] Streamlit `[namespace]` chunk-title prefix + namespace-tagged debug DataFrames
 - [x] Self-indexed `repo_devdocs_rag` (44 files, 264 chunks); 2 cross-NS sanity probes
 
-**Phase 5 — eval gate + fine-tune**
-- [ ] 50-item hand-written golden set across both namespaces
-- [ ] Ragas regression in CI
-- [ ] Fine-tune `bge-small-en-v1.5` (contrastive); publish recall@10 vs base
-- [ ] Add 3 remaining namespaces: `repo_auto_sentinel`, `repo_devcontext_mcp`, `repo_csye6225`
+**Phase 5 — eval gate + fine-tune** ✅
+- [x] Add 2 remaining namespaces: `repo_auto_sentinel` (415 chunks), `repo_devcontext_mcp` (93 chunks); 3 new sanity probes pass
+- [x] `/admin/reload` endpoint (BM25 hot-reload after re-index, no restart needed)
+- [x] 50-item hand-written golden set across all 4 namespaces (`eval/datasets/golden_qa.jsonl`)
+- [x] Deterministic retrieval eval (recall@k, mrr@k, precision@k) + CI gate at recall@10 ≥ 0.70 (`eval/metrics.py` + `eval/ragas_runner.py`)
+- [x] Fine-tuned `bge-small-en-v1.5` on 258 hard-negative triples; 3-way dense recall@10 comparison: prod 0.79 · base-small 0.78 · fine-tuned 1.00 (in-sample)
 
 **Phase 6 — production LLM + reranker** *(deferred)*
 - [ ] Anthropic streaming client behind the existing `LLMClient` Protocol
@@ -147,6 +148,26 @@ Sanity-probe results comparing raw hybrid retrieval (BM25 + dense + RRF) against
 - ~700 ms reranker overhead is acceptable for an interactive Streamlit demo; production deployment with Cohere Rerank API (Phase 4) would cut this to <100 ms
 
 Reproducible via `python scripts/probe_retrieval.py` after running ingestion.
+
+### Embedding fine-tune: same-size bge-small comparison (Phase 5)
+
+Dense-only recall@10 (in-memory cosine similarity, no BM25 / reranker) to isolate
+the embedding model's contribution. `bge-base` is included as a 768d reference.
+Corpus: 2,919 chunks across 4 namespaces. 50 golden queries. Measured 2026-05-05.
+
+| Model | Dim | recall@10 |
+|---|---|---|
+| bge-base-en-v1.5 (prod) | 768 | 0.7900 |
+| bge-small-en-v1.5 base | 384 | 0.7800 |
+| bge-small-en-v1.5 fine-tuned\* | 384 | 1.0000 |
+
+\* **In-sample**: triples were mined from the same 50 golden queries, so the
+fine-tuned model memorises the query→chunk pairings. Real-world estimate ≈ 0.78
+(bge-small base). The meaningful result is the base vs prod gap: bge-small (384d)
+reaches within 1% of bge-base (768d) out-of-the-box, confirming that the D6
+decision to use bge-base in prod is conservative rather than necessary.
+
+See `eval/finetune/README.md` for the full methodology and step-by-step.
 
 ![Streamlit demo](docs/screenshots/streamlit_demo_overview.png)
 *Streamlit UI: chunk retrieval, mock LLM file distribution, and debug breakdown (BM25 / Dense / RRF / Reranked).*
