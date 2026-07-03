@@ -20,6 +20,7 @@ dependencies = [
     "ragas>=0.2.0",
     "langchain-text-splitters>=0.3.0",
     "httpx>=0.27.0",
+    "openai>=1.55.0",
     "redis>=5.1.0",
     "python-dotenv>=1.0.1",
     "structlog>=24.4.0",
@@ -36,6 +37,15 @@ dev = [
     "types-redis>=4.6.0",
     "pre-commit>=4.0.0",
 ]
+tracing = [
+    "llmops-dashboard",
+]
+
+[tool.uv.sources]
+# Observability (LLMTracer → Langfuse). Local sibling repo, editable — same
+# pattern as auto-sentinel. ark_client imports it under try/except and streams
+# untraced when absent, so the hermetic suite stays green without it.
+llmops-dashboard = { path = "../llmops-dashboard", editable = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -79,9 +79,29 @@ class MockLLMClient:
 
 
 def get_llm_client() -> LLMClient:
-    """Return the active LLM client. Phase 1 always returns MockLLMClient."""
+    """Return the active LLM client.
+
+    `USE_MOCK_LLM=true` (the default, and the test/CI setting) returns the
+    mock; `false` requires `ARK_API_KEY` and returns the real Ark client
+    (Phase 6). Misconfiguration raises a typed GenerationError rather than
+    silently falling back to the mock.
+    """
     settings = get_settings()
     if settings.use_mock_llm:
         return MockLLMClient()
-    # TODO(Phase 3): return AnthropicClient(settings.anthropic_api_key)
-    return MockLLMClient()
+
+    # Local import: ark_client imports LLMMessage from this module.
+    from devdocs_rag.generation.ark_client import ArkLLMClient
+    from devdocs_rag.generation.errors import GenerationError
+
+    if not settings.ark_api_key:
+        raise GenerationError(
+            "USE_MOCK_LLM=false but ARK_API_KEY is not set — refusing to fall back to mock"
+        )
+    return ArkLLMClient(
+        api_key=settings.ark_api_key,
+        model=settings.ark_model,
+        base_url=settings.ark_base_url,
+        temperature=settings.llm_temperature,
+        max_tokens=settings.llm_max_tokens,
+    )

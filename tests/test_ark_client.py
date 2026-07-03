@@ -8,7 +8,7 @@ patched on the ark_client module, mirroring auto-sentinel's test seam.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 import openai
@@ -77,7 +77,7 @@ class _FakeSDK:
 class _RecordingTracer:
     """Fake LLMTracer context manager recording call order."""
 
-    instances: list[_RecordingTracer] = []
+    instances: ClassVar[list[_RecordingTracer]] = []
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
@@ -94,9 +94,7 @@ class _RecordingTracer:
     def set_tokens(self, *, prompt: int, completion: int) -> None:
         self.events.append(("tokens", prompt, completion))
 
-    def set_cost_breakdown(
-        self, *, input_cost: float, output_cost: float, currency: str
-    ) -> None:
+    def set_cost_breakdown(self, *, input_cost: float, output_cost: float, currency: str) -> None:
         self.events.append(("cost", input_cost, output_cost, currency))
 
 
