@@ -9,6 +9,12 @@ on:
 jobs:
   lint-type-test:
     runs-on: ubuntu-latest
+    env:
+      # The tracing extra maps llmops-dashboard to a local sibling path via
+      # [tool.uv.sources]; that path doesn't exist on CI runners. Deps are
+      # installed with `uv pip install -e .[dev]` below, so stop `uv run`
+      # from re-resolving the project (which would chase the missing path).
+      UV_NO_SYNC: "1"
     steps:
       - uses: actions/checkout@v4
 
