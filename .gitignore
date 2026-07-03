@@ -22,4 +22,5 @@ eval/finetune/bge-small-finetuned-holdout/
 .DS_Store
 *.log
 .claude/settings.local.json
+.claude/worktrees/
 uv.lock
