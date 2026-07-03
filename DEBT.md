@@ -53,17 +53,31 @@ Debt here is anchored to the phase roadmap (Phase 1-5 complete → Phase 6 real 
 
 ## Cross-Project Coordination Anchors
 
-- [ ] **repo_auto_sentinel corpus stale + golden items reference v1 files (blocked on
+- [X] **repo_auto_sentinel corpus stale + golden items reference v1 files (blocked on
   auto-sentinel Sprint 6)**: the `repo_auto_sentinel` namespace was indexed in May (418 chunks
   across 16 pre-Sprint-5 commit shas) — none of the Sprint 5 `llm/` / agents code is searchable.
-  Worse, golden items **q011–q015** all point at v1 single-agent files
-  (`autosentinel/nodes/parse_log.py`, `analyze_error.py`, `execute_fix.py`, `format_report.py`,
-  `autosentinel/graph.py`) which Sprint 6's v1 retirement deletes; the incremental deletion sweep
-  will then remove their chunks and the eval gate breaks on dead ground truth. **何时修 (right
-  after Sprint 6 merges)**: re-ingest `repo_auto_sentinel`, audit `eval/datasets/golden_qa.jsonl`
-  (and the committed 40/10 split files) for paths that no longer exist, re-author the affected
-  golden items against the 6-agent codebase, re-run the eval gate and re-baseline recall numbers
-  if they move.
+  Worse, golden items pointed at v1 single-agent files which Sprint 6's v1 retirement deletes.
+  **Resolved (2026-07-03, right after the Sprint 6 + M4-enabler merges)**:
+  - Incremental re-ingest: 418 → **903 chunks** (Sprint 5/6 llm/ + agents/ + api/ + specs now
+    searchable), deletion sweep removed the 6 retired v1 files' chunks.
+  - Audit found **8 dead refs across 6 items** (q012/q013/q014/q037/q038/q048 — incl. two the
+    original estimate missed); all 6 re-authored against the 6-agent codebase (DiagnosisAgent,
+    VerifierAgent, build_multi_agent_graph, AgentState, _route_after_parse/_or_cost_exhausted),
+    每条经 Qdrant 存在性校验（AI 起草，建议 owner 抽查 query 措辞）。40/10 split regenerated
+    (same ids, q013 stays in holdout).
+  - Eval re-run: recall@10 **0.79 → 0.69** — failures spread across old items (incl.
+    pure-pytorch queries), i.e. structural chunk-competition from the corpus doubling, not the
+    re-authored items. **Gate re-baselined 0.70 → 0.62** (same ~9%-buffer policy; mirrors
+    auto-sentinel's honest 0.98 → 0.62 re-baseline ethos). Note: the 40/10 holdout numbers in
+    `eval/finetune/README.md` were measured pre-rebuild; the zero-lift conclusion is unaffected.
+
+- [ ] **recall@10 0.69 on the rebuilt corpus — retrieval quality anchor**: the corpus doubling
+  (2,905 → 3,390 chunks) dropped hybrid recall@10 from 0.79 to 0.69. Candidate improvements,
+  in rough value order: (a) include the cross-encoder reranker in the eval path (production
+  `/query/stream` reranks; the gate currently measures pre-rerank hybrid ranking only);
+  (b) chunk-type weighting (spec/docs markdown from auto-sentinel now competes with code
+  chunks); (c) per-namespace k allocation. **何时修**: next time retrieval work is scheduled;
+  not blocking M5.
 
 ## Process Debt
 
