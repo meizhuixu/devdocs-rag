@@ -47,6 +47,20 @@ Debt here is anchored to the phase roadmap (Phase 1-5 complete → Phase 6 real 
 
 ---
 
+## Cross-Project Coordination Anchors
+
+- [ ] **repo_auto_sentinel corpus stale + golden items reference v1 files (blocked on
+  auto-sentinel Sprint 6)**: the `repo_auto_sentinel` namespace was indexed in May (418 chunks
+  across 16 pre-Sprint-5 commit shas) — none of the Sprint 5 `llm/` / agents code is searchable.
+  Worse, golden items **q011–q015** all point at v1 single-agent files
+  (`autosentinel/nodes/parse_log.py`, `analyze_error.py`, `execute_fix.py`, `format_report.py`,
+  `autosentinel/graph.py`) which Sprint 6's v1 retirement deletes; the incremental deletion sweep
+  will then remove their chunks and the eval gate breaks on dead ground truth. **何时修 (right
+  after Sprint 6 merges)**: re-ingest `repo_auto_sentinel`, audit `eval/datasets/golden_qa.jsonl`
+  (and the committed 40/10 split files) for paths that no longer exist, re-author the affected
+  golden items against the 6-agent codebase, re-run the eval gate and re-baseline recall numbers
+  if they move.
+
 ## Process Debt
 
 - [X] **Phase 5 merge not pushed**: local `main` was ahead of `origin/main` by 7 commits (the
