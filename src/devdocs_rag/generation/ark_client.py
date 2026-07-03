@@ -24,7 +24,6 @@ context exits — the span ships on `__exit__` with correct token counts.
 from __future__ import annotations
 
 import logging
-import secrets
 from collections.abc import AsyncIterator
 from contextlib import nullcontext
 from typing import Any
@@ -83,15 +82,17 @@ class ArkLLMClient:
     async def stream(self, messages: list[LLMMessage]) -> AsyncIterator[str]:
         """Yield token fragments; ship one traced generation span per call.
 
-        trace_id is generated per call (32-char lowercase hex, OTel-compatible).
-        External trace_id injection (e.g. from devcontext-mcp) is a deliberate
-        Phase-2/M4 extension point — it requires a Protocol signature change,
-        which we don't do unilaterally.
+        The tracer is opened WITHOUT a trace_id: LLMTracer then self-generates
+        one and owns the parent trace (trace + generation + tags — the standard
+        single-call pattern). Injecting a trace_id flips it to
+        owns_trace=False, which emits an orphan generation unless the caller
+        creates the parent trace itself (auto-sentinel's open_parent_trace
+        pattern). External trace_id injection (e.g. from devcontext-mcp) is a
+        deliberate M4 extension point — it needs both a Protocol signature
+        change and a parent-trace owner.
         """
-        trace_id = secrets.token_hex(16)
         tracer_cm = (
             LLMTracer(
-                trace_id=trace_id,
                 project=_TRACER_PROJECT,
                 component=_TRACER_COMPONENT,
                 model=self._model,
@@ -123,6 +124,8 @@ class ArkLLMClient:
                         completion_tokens = chunk.usage.completion_tokens
             except openai.APIError as e:
                 raise GenerationError(f"Ark API error: {e}") from e
+
+            trace_id = getattr(tracer, "trace_id", None)
 
             # Post-stream, pre-exit: usage is only known once the stream is
             # exhausted; the span ships with these values on __exit__.
