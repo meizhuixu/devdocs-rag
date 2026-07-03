@@ -254,8 +254,12 @@ If you (an LLM coding agent) are asked to make a change:
    probably needs a design discussion first.
 5. Update tests. Add a smoke test if you added a new module.
 6. Update `ARCHITECTURE.md` if you changed a design decision.
-7. Run `ruff check . && mypy src/ && pytest` again.
-8. Write a commit message that explains the **why**, not just the what.
+7. Update `docs/PROJECT.md`'s "当前状态（快照）" section and `DEBT.md` when the
+   change lands as a PR: new debt gets an entry inline; resolved debt flips
+   `[ ]` → `[X]` in the same commit as the fix (keep the entry). PROJECT.md is
+   a snapshot / entry point — authoritative progress stays in `git log` + `DEBT.md`.
+8. Run `ruff check . && mypy src/ && pytest` again.
+9. Write a commit message that explains the **why**, not just the what.
 
 ---
 
