@@ -157,9 +157,13 @@ async def test_tracer_gets_tokens_and_cost_after_stream(
     tracer = _RecordingTracer.instances[0]
     assert tracer.kwargs["project"] == "devdocs-rag"
     assert tracer.kwargs["model"] == DOUBAO_PRO
-    # 32-char lowercase hex, OTel-compatible (portfolio-wide convention).
-    trace_id = tracer.kwargs["trace_id"]
-    assert len(trace_id) == 32 and all(c in "0123456789abcdef" for c in trace_id)
+    # Standalone single-call client: trace_id must NOT be injected. Passing one
+    # flips LLMTracer to owns_trace=False (attach-to-existing-trace mode) and
+    # no parent trace is ever created — the span becomes an orphan invisible in
+    # Langfuse. The tracer self-generates and owns the trace here; external
+    # trace_id injection arrives with the M4 cross-service work, where the
+    # caller creates the parent trace.
+    assert "trace_id" not in tracer.kwargs
 
     kinds = [e[0] for e in tracer.events]
     assert kinds == ["tokens", "cost", "exit"]
