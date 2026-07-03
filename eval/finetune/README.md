@@ -122,6 +122,38 @@ queries. In-memory cosine similarity (no BM25, no reranker).
 
 ---
 
+## Out-of-sample results (holdout experiment, 2026-07-03 — Phase 6)
+
+The "future experiment" above was run. `split_holdout.py` makes a deterministic
+stratified 40/10 split (3 pytorch / 3 devdocs / 2 sentinel / 2 mcp held out; all
+4 cross-namespace items kept in training). Triples were re-mined from the 40
+training items only (204 triples), bge-small re-trained from scratch, and all
+three models scored on the **10 held-out queries the fine-tune never saw**:
+
+```bash
+python eval/finetune/split_holdout.py
+USE_MOCK_EMBEDDINGS=false python eval/finetune/mine_triples.py \
+  --golden eval/datasets/golden_train_40.jsonl --output eval/finetune/triples_holdout.jsonl
+python eval/finetune/train.py --triples eval/finetune/triples_holdout.jsonl \
+  --output eval/finetune/bge-small-finetuned-holdout
+USE_MOCK_EMBEDDINGS=false python eval/finetune/eval_comparison.py \
+  --golden eval/datasets/golden_holdout_10.jsonl --finetuned eval/finetune/bge-small-finetuned-holdout
+```
+
+| Model | Dim | held-out recall@10 (n=10) |
+|---|---|---|
+| bge-base-en-v1.5 (prod) | 768 | 0.8000 |
+| bge-small-en-v1.5 (base) | 384 | 0.8500 |
+| bge-small-en-v1.5 (fine-tuned on 40) | 384 | **0.8500** |
+
+**Interpretation**: fine-tuning delivers **zero out-of-sample lift** (0.85 → 0.85),
+confirming the in-sample 1.0000 was memorisation of the mined query→chunk pairs.
+With n=10 the base-vs-prod gap (0.85 vs 0.80 = one query) is within noise. Both
+earlier decisions stand, now with honest evidence: production stays on bge-base,
+and no further fine-tuning work is warranted at this corpus size.
+
+---
+
 ## Gitignored artifacts
 
 | Path | Why gitignored |

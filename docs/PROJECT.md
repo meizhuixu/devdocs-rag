@@ -8,11 +8,19 @@
 
 ## 当前状态（快照 2026-07-03）
 
-- ✅ **Phase 1-5 全部完成**（2026-05-05），main 干净，130 tests passing。
-- ⏳ **Phase 6 待启动**：MockLLMClient → 真实 LLM + out-of-sample eval set。
-  排在项目 1（auto-sentinel）Sprint 5 之后串行启动——项目 1 已完成，项目 4 Phase 2 接入
-  auto-sentinel 之后就轮到本项目。真实 LLM API key 尚未配置（仅 `.env.example`）。
-- Phase 6 待办细项见 `DEBT.md`（本次新建）。
+- ✅ **Phase 1-6 全部完成**。Phase 6（2026-07-03）：`ArkLLMClient` 真实流式 LLM
+  （openai SDK → 火山方舟，doubao-seed-2.0-pro，复用组合级 ARK_API_KEY）进 `LLMClient`
+  Protocol 后面，API 层零改动；139 tests passing（新增 9 个，全 hermetic）。
+- ✅ **LLMTracer → Langfuse 实测贯通**：真实 SSE 全链路（检索→精排→真 LLM→`done`）trace 落库,
+  tokens 621+383、cost ¥0.0081152 CNY 与价格表精确对账。顺带修掉一个真 bug：注入 trace_id
+  会让 LLMTracer 只发孤儿 generation（详见 llmops onboarding 的 Trace Ownership 节）。
+- ✅ **Out-of-sample eval 完成**：40/10 分层 holdout 重训重测——held-out recall@10：
+  prod-base 0.80 / small-base 0.85 / **fine-tuned 0.85（零增益）**，in-sample 1.00 确证为
+  记忆效应；生产维持 bge-base，不再做 fine-tune。
+- 范围决策（2026-07-03）：Cohere Rerank 移出范围（本地 cross-encoder 即生产方案）；
+  Anthropic/DeepSeek 备选由"单 Ark 网关复用"决策取代，需要时加一个 Protocol 实现类即可。
+- 新增技术债 1 条：SSE 客户端中途断连 → span 记 0 token（供应商仍计费），见 `DEBT.md`。
+- 下一步：**项目 3 DevContext MCP Phase 2**（M4）——本项目作为其真实后端之一。
 
 ---
 
@@ -45,14 +53,15 @@
 
 50 条手写 golden set（query → 期望命中 chunk），覆盖 4 namespace + 3 跨 namespace 查询。
 
-| Model | recall@10 |
-|---|---|
-| **bge-base-en-v1.5（生产）** | **0.79** |
-| bge-small-en-v1.5 base | 0.78 |
-| bge-small fine-tuned | 1.00（in-sample，真实估 ~0.78） |
+| Model | 全集 recall@10 | held-out recall@10（n=10，2026-07-03） |
+|---|---|---|
+| **bge-base-en-v1.5（生产）** | **0.79** | 0.80 |
+| bge-small-en-v1.5 base | 0.78 | 0.85 |
+| bge-small fine-tuned | 1.00（in-sample） | **0.85（零增益）** |
 
-fine-tune 用对比学习 + hard negative mining，结论：bge-base 多花的维度只换 1%，
-**不要重做 fine-tuning**。CI gate：recall@10 ≥ 0.70，PR 触碰 retrieval/eval 代码即跑，不达标 fail。
+fine-tune 用对比学习 + hard negative mining。out-of-sample holdout（40 训练 / 10 held-out）
+证实 in-sample 1.00 是记忆效应、fine-tune 无真实增益——**不要重做 fine-tuning**，生产维持
+bge-base。CI gate：recall@10 ≥ 0.70，PR 触碰 retrieval/eval 代码即跑，不达标 fail。
 
 ## 技术栈
 
@@ -60,12 +69,14 @@ Qdrant / bge-base-en-v1.5 / BM25Okapi / RRF / ms-marco-MiniLM-L-6-v2 /
 sentence-transformers + MultipleNegativesRankingLoss / FastAPI + SSE / Streamlit /
 pytest（130 tests）/ GitHub Actions（ruff + mypy + pytest + eval gate）/ uv
 
-## Phase 6 范围（待启动）
+## Phase 6 落地内容（2026-07-03 完成）
 
-1. 接真实 LLM（Anthropic / OpenAI，经 `LLMClient` Protocol 新增实现类）
-2. LLM 调用接入项目 4 的 LLMTracer；注意 SSE 流式下 `completion_tokens` 只能在 stream
-   结束后拿到（对应 llmops-dashboard DEBT 的 "Streaming token counts unverified"）
-3. Out-of-sample eval set：fine-tune 训练数据与 golden set 同源（in-sample memorization），需重做
+1. `ArkLLMClient`（`generation/ark_client.py`）：异步流式，`stream_options={"include_usage": True}`
+   取最终 usage chunk；`GenerationError` 类型化错误；SDK 注入缝保持测试 hermetic
+2. LLMTracer 可选接入（tracing extra → 本地 editable llmops-dashboard）；流式 token 计数
+   与 CNY 成本实测精确；单调用客户端不注入 trace_id（tracer 自持父 trace）
+3. Out-of-sample holdout eval：`eval/finetune/split_holdout.py` + 复现命令与数字见
+   `eval/finetune/README.md`
 
 ## 跨项目依赖
 

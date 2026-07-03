@@ -4,7 +4,7 @@
 > repos. Built as a personal knowledge base — dogfooded daily.
 
 [![CI](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/meizhuixu/devdocs-rag/actions/workflows/ci.yml)
-![status: phase 5 — complete](https://img.shields.io/badge/status-phase%205%20complete-brightgreen)
+![status: phase 6 — complete](https://img.shields.io/badge/status-phase%206%20complete-brightgreen)
 ![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 
 ---
@@ -76,7 +76,13 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 
 ## Status
 
-✅ **Phase 4 complete** — multi-namespace cross-RRF retrieval + RST cleaning + self-indexed `repo_devdocs_rag`. LLM still mocked, cross-encoder reranker still local; Anthropic + Cohere ship in Phase 6.
+✅ **Phase 6 complete** — the generation layer now runs a **real streaming LLM**
+(doubao-seed-2.0-pro via the Volcano Ark OpenAI-compatible gateway) behind the unchanged
+`LLMClient` Protocol, with every call traced to a self-hosted Langfuse (tokens + native-CNY
+cost, verified end-to-end over SSE). Fine-tune claims re-measured **out-of-sample** on a
+10-item holdout: fine-tuning gives zero held-out lift (0.85 → 0.85), confirming the earlier
+in-sample 1.00 was memorisation. The local cross-encoder reranker is the production reranker
+(Cohere API dropped from scope — no quality gap justified a second external dependency).
 
 **Demonstrated capabilities so far**:
 - Real-time embedding via bge-base-en-v1.5 on Apple Silicon MPS (~80 chunks/sec sustained)
@@ -117,10 +123,17 @@ Project conventions: **[CLAUDE.md](CLAUDE.md)**.
 - [x] Deterministic retrieval eval (recall@k, mrr@k, precision@k) + CI gate at recall@10 ≥ 0.70 (`eval/metrics.py` + `eval/ragas_runner.py`)
 - [x] Fine-tuned `bge-small-en-v1.5` on 258 hard-negative triples; 3-way dense recall@10 comparison: prod 0.79 · base-small 0.78 · fine-tuned 1.00 (in-sample)
 
-**Phase 6 — production LLM + reranker** *(deferred)*
-- [ ] Anthropic streaming client behind the existing `LLMClient` Protocol
-- [ ] DeepSeek-V3 via Volcano API as alternative provider
-- [ ] Cohere Rerank API behind the existing `Reranker` Protocol (cross-encoder stays as offline fallback)
+**Phase 6 — production LLM + observability + honest eval** ✅
+- [x] `ArkLLMClient`: real async **streaming** client (openai SDK, base_url → Volcano Ark,
+  doubao-seed-2.0-pro) behind the existing `LLMClient` Protocol — API layer untouched
+- [x] `USE_MOCK_LLM=false` dispatch with typed `GenerationError` on missing key (no silent mock fallback)
+- [x] LLMTracer → Langfuse: per-call trace with tokens + native-CNY cost; streaming usage
+  from the final `include_usage` chunk, set post-stream / pre-exit (verified on a real run:
+  621+383 tokens, ¥0.0081 — exact against the price table)
+- [x] Out-of-sample eval: deterministic 40/10 holdout split, re-mined triples, re-trained
+  bge-small → held-out recall@10: prod-base 0.80 · small-base 0.85 · **fine-tuned 0.85 (no lift)**
+- [x] Scope decisions: single Ark gateway reused portfolio-wide (Anthropic/DeepSeek alternatives
+  become one more Protocol impl when needed); Cohere Rerank dropped — local cross-encoder is production
 
 ---
 
