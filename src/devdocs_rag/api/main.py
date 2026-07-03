@@ -13,6 +13,9 @@ SSE event order:
     event: token       data: <token-fragment>
     ...
     event: done        data:
+
+With `retrieval_only=true` in the request, the `token` events (and the LLM
+call behind them) are skipped entirely: retrieved → done.
 """
 
 from __future__ import annotations
@@ -44,6 +47,14 @@ class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     namespaces: list[str] = Field(default_factory=list)
     top_k: int = Field(default=10, ge=1, le=50)
+    retrieval_only: bool = Field(
+        default=False,
+        description=(
+            "When true, /query/stream emits `retrieved` then `done` with no LLM "
+            "generation (no client call, no tracer span). M4 enabler for "
+            "devcontext-mcp, which only consumes retrieval results."
+        ),
+    )
 
 
 class HealthResponse(BaseModel):
@@ -62,6 +73,19 @@ class ReloadResponse(BaseModel):
     bm25_chunks: dict[str, int]
 
 
+def _int_or_none(raw: str | None) -> int | None:
+    """Parse Qdrant string metadata into an int; None when absent/empty.
+
+    Hydration stores every metadata value as `str` (doc chunks carry "" for
+    line numbers), so the wire payload converts here instead of leaking
+    stringly-typed line numbers to API consumers.
+    """
+    try:
+        return int(raw) if raw else None
+    except ValueError:
+        return None
+
+
 def _chunk_summary(chunk: RetrievedChunk, snippet_len: int = 300) -> dict[str, Any]:
     return {
         "namespace": chunk.namespace,
@@ -70,6 +94,10 @@ def _chunk_summary(chunk: RetrievedChunk, snippet_len: int = 300) -> dict[str, A
         "heading_path": chunk.metadata.get("heading_path", ""),
         "score": chunk.score,
         "snippet": chunk.text[:snippet_len],
+        # Additive fields (M4 MCP enabler): int | None line span + chunk kind.
+        "start_line": _int_or_none(chunk.metadata.get("start_line")),
+        "end_line": _int_or_none(chunk.metadata.get("end_line")),
+        "chunk_type": chunk.chunk_type,
     }
 
 
@@ -203,6 +231,17 @@ def create_app() -> FastAPI:
                     for c in reranked
                 ],
             }
+
+        if req.retrieval_only:
+            # M4 MCP enabler: the consumer only wants retrieval results.
+            # Skip generation entirely — no LLM client, no tokens, no tracer
+            # span (the span lives inside the client's stream()), so the
+            # disconnect-mid-stream 0-token-span debt can't trigger here.
+            async def retrieval_only_stream() -> AsyncIterator[dict[str, str]]:
+                yield {"event": "retrieved", "data": json.dumps(retrieved_payload)}
+                yield {"event": "done", "data": ""}
+
+            return EventSourceResponse(retrieval_only_stream())
 
         # Real chunks → mock LLM response that enumerates the file_path
         # distribution, so the demo visibly proves retrieval is wired.

@@ -21,6 +21,9 @@
   Anthropic/DeepSeek 备选由"单 Ark 网关复用"决策取代，需要时加一个 Protocol 实现类即可。
 - 新增技术债 1 条：SSE 客户端中途断连 → span 记 0 token（供应商仍计费），见 `DEBT.md`。
 - 下一步：**项目 3 DevContext MCP Phase 2**（M4）——本项目作为其真实后端之一。
+- 分支 `feat/m4-mcp-enabler`（存在，未合并）：/query/stream 加 `retrieval_only` 请求字段
+  （检索完直接 `done`，不走 LLM/不产 span），`retrieved` payload 补
+  `start_line`/`end_line`/`chunk_type`——供 MCP 消费。
 
 ---
 

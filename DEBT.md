@@ -44,6 +44,10 @@ Debt here is anchored to the phase roadmap (Phase 1-5 complete → Phase 6 real 
   **何时修 (revisit with M4/MCP integration or llmops Phase 3 alerting)**: either estimate
   tokens from the streamed fragments, or accept and document the gap as a known limit of
   streaming cost capture.
+  *Update (2026-07-03, `feat/m4-mcp-enabler`)*: materially mitigated for the MCP consumer —
+  `QueryRequest.retrieval_only=true` skips LLM generation entirely (no client call, no tracer
+  span), so devcontext-mcp's retrieval traffic can never hit this path. The disconnect gap
+  still exists for normal (generating) queries; entry stays open.
 
 ---
 
