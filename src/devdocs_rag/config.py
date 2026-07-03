@@ -24,6 +24,16 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = Field(default=None)
     openai_api_key: str | None = Field(default=None)
 
+    # Volcano Ark gateway (Phase 6 real LLM — shared portfolio decision:
+    # single Ark gateway + single ARK_API_KEY, native-CNY accounting).
+    # `ark_model` is an account-level inference endpoint id
+    # (doubao-seed-2.0-pro), same endpoint auto-sentinel routes to.
+    ark_api_key: str | None = Field(default=None)
+    ark_base_url: str = Field(default="https://ark.cn-beijing.volces.com/api/v3")
+    ark_model: str = Field(default="ep-20260508052420-fwq5q")
+    llm_temperature: float = Field(default=0.2)
+    llm_max_tokens: int = Field(default=1024)
+
     # Reranker
     cohere_api_key: str | None = Field(default=None)
 

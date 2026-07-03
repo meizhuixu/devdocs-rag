@@ -12,23 +12,38 @@ Debt here is anchored to the phase roadmap (Phase 1-5 complete → Phase 6 real 
 
 ## Phase 6 Anchors (real LLM integration)
 
-- [ ] **MockLLMClient → real provider**: the generation layer runs on `MockLLMClient` behind the
-  `LLMClient` Protocol. Phase 6 adds a real implementation class (Anthropic / OpenAI); no other
-  code changes by design. Blocked on: no real API key configured yet (only `.env.example`), and
-  the portfolio's serial ordering (auto-sentinel Sprint 5 ✅ → llmops-dashboard Phase 2 →
-  **this**). Do NOT wire a real client before Phase 6 formally starts.
+- [X] **MockLLMClient → real provider**: the generation layer ran on `MockLLMClient` behind the
+  `LLMClient` Protocol. **Resolved (2026-07-03, Phase 6)**: `ArkLLMClient` (async streaming,
+  openai SDK → Volcano Ark gateway, doubao-seed-2.0-pro, shared portfolio ARK_API_KEY) landed
+  behind the unchanged Protocol; `USE_MOCK_LLM=false` dispatch raises typed `GenerationError`
+  on missing key instead of silently falling back to mock. Verified end-to-end over the real
+  API (`/query/stream` SSE to `done`, grounded answer, trace in Langfuse).
 
-- [ ] **Streaming token counts with LLMTracer (cross-repo, mirrors llmops-dashboard DEBT)**:
-  DevDocs serves over SSE, so `completion_tokens` is only known after the stream closes, but
-  `LLMTracer` requires `set_tokens()` before the `with` block exits. The "set tokens post-stream,
-  pre-exit" pattern is unproven against a real streaming call. Verify during Phase 6 wiring and
-  document the streaming usage pattern if it differs from non-streaming.
+- [X] **Streaming token counts with LLMTracer (cross-repo, mirrors llmops-dashboard DEBT)**:
+  `completion_tokens` is only known after the SSE stream closes. **Resolved (2026-07-03)**:
+  `stream_options={"include_usage": True}` delivers usage in a final chunk; post-stream
+  `set_tokens()`/`set_cost_breakdown()` before context exit shipped exact numbers on a real
+  run (621+383 tokens, ¥0.0081152 CNY — matches the ¥3.2/¥16 price table). Pattern + the
+  trace-ownership gotcha (injected trace_id without a parent-trace owner ⇒ orphan generation)
+  documented in llmops-dashboard `docs/onboarding.md`; llmops DEBT entry flipped in the same
+  change.
 
-- [ ] **Out-of-sample eval set**: the bge-small fine-tune training data and the 50-query golden
-  set are same-source, so the fine-tuned model's recall@10 = 1.00 is in-sample memorization
-  (real-world estimate ~0.78). Before publishing any fine-tune claim, build a held-out eval set.
-  Note: do NOT redo the fine-tuning itself — the bge-base vs bge-small gap is a settled 1%
-  decision; only the eval methodology needs the out-of-sample fix.
+- [X] **Out-of-sample eval set**: fine-tune training data and golden set were same-source, so
+  recall@10 = 1.00 was in-sample memorization. **Resolved (2026-07-03)**: deterministic 40/10
+  stratified holdout (`eval/finetune/split_holdout.py`), triples re-mined from the 40 only,
+  bge-small re-trained, scored on the 10 held-out queries: prod-base 0.80 / small-base 0.85 /
+  **fine-tuned 0.85 — zero held-out lift**. In-sample 1.00 confirmed as memorisation; both
+  standing decisions (prod = bge-base, no more fine-tuning) now have honest evidence. Full
+  write-up in `eval/finetune/README.md`.
+
+- [ ] **Client disconnect mid-stream ships a token-less span**: if the SSE consumer drops the
+  connection before the stream finishes (observed with `curl | head`), the async generator is
+  cancelled before the usage chunk arrives and the LLMTracer span ships with 0 tokens / no
+  cost — while the provider still bills for whatever was generated. The span's error metadata
+  records the cancellation, so observability is honest, but cost accounting undercounts.
+  **何时修 (revisit with M4/MCP integration or llmops Phase 3 alerting)**: either estimate
+  tokens from the streamed fragments, or accept and document the gap as a known limit of
+  streaming cost capture.
 
 ---
 

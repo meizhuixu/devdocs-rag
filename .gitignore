@@ -16,7 +16,9 @@ qdrant_storage/
 data/raw/
 data/processed/
 eval/finetune/triples.jsonl
+eval/finetune/triples_holdout.jsonl
 eval/finetune/bge-small-finetuned/
+eval/finetune/bge-small-finetuned-holdout/
 .DS_Store
 *.log
 .claude/settings.local.json

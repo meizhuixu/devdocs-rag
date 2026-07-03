@@ -238,6 +238,11 @@ def do_thing() -> None:
 - **Phase 4**: namespace #2 (`devdocs_rag` self-index), then #1, #3, #4 as
   those projects come online.
 - **Phase 5**: Ragas CI gate, embedding fine-tune comparison in README.
+- **Phase 6 (done, 2026-07-03)**: real streaming LLM via `ArkLLMClient`
+  (Volcano Ark gateway, doubao-seed-2.0-pro) behind the same `LLMClient`
+  Protocol; LLMTracer → Langfuse tracing on every call; out-of-sample
+  holdout eval for the fine-tune claims. `USE_MOCK_LLM=false` +
+  `ARK_API_KEY` switches production on; tests stay hermetic on the mock.
 
 ---
 

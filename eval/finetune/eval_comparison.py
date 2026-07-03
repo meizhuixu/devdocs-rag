@@ -169,7 +169,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="3-way dense-recall comparison.")
     parser.add_argument("--golden", type=Path, default=_GOLDEN)
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument(
+        "--finetuned",
+        type=Path,
+        default=_FINETUNED,
+        help="Path to the fine-tuned model dir (e.g. the holdout-trained variant).",
+    )
     args = parser.parse_args(argv)
+
+    models: list[tuple[str, str]] = [
+        (label, path) for label, path in _MODELS if path != str(_FINETUNED)
+    ]
+    models.append((f"bge-small fine-tuned ({args.finetuned.name})", str(args.finetuned)))
 
     settings = get_settings()
     if settings.use_mock_embeddings:
@@ -202,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     print("-" * 50)
 
     results: list[tuple[str, float | None]] = []
-    for label, model_path in _MODELS:
+    for label, model_path in models:
         recall = _eval_model(label, model_path, all_chunks, golden_items, top_k=args.top_k)
         results.append((label, recall))
         val = f"{recall:.4f}" if recall is not None else "N/A (model not found)"
